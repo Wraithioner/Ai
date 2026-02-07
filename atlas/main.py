@@ -10,21 +10,27 @@ from pathlib import Path
 from atlas.core.config import load_config
 from atlas.core.actions import Actions
 from atlas.core.brain import Brain
+from atlas.core.computer import Computer
 from atlas.core.ears import Ears
+from atlas.core.eyes import Eyes
+from atlas.core.safety import Safety
 from atlas.core.voice import Voice
 
 logger = logging.getLogger("atlas")
 
 
 class VoiceAgent:
-    """The main AI voice agent that listens, thinks, and speaks."""
+    """The main AI voice agent that listens, thinks, speaks, and controls the computer."""
 
     def __init__(self, config_path: str | None = None):
         self.config = load_config(config_path)
         self._setup_logging()
         self.actions = Actions()
         self.brain = Brain(self.config)
+        self.computer = Computer(self.config)
         self.ears = Ears(self.config)
+        self.eyes = Eyes(self.config)
+        self.safety = Safety(self.config)
         self.voice = Voice(self.config)
         self.running = False
 
@@ -69,6 +75,103 @@ class VoiceAgent:
         self.voice.initialize()
 
         logger.info("All systems ready!")
+
+    def _agent_loop(self, task: str):
+        """Run the observe-plan-execute loop for computer control tasks.
+
+        Steps per iteration:
+        1. Read screen text (OCR)
+        2. Ask Brain to plan next action
+        3. Safety check the action
+        4. Execute the action
+        5. Wait for screen to update, then repeat
+        """
+        max_steps = self.safety.max_steps
+        logger.info("Agent loop started for task: %s (max %d steps)", task, max_steps)
+
+        for step in range(max_steps):
+            logger.info("Agent step %d/%d", step + 1, max_steps)
+
+            try:
+                # 1. Observe — read the screen
+                screen_text = self.eyes.read_screen()
+                if not screen_text:
+                    self.voice.speak("I can't read the screen right now.")
+                    break
+
+                # 2. Plan — ask the Brain what to do next
+                action = self.brain.plan_action(task, screen_text)
+                logger.info("Planned action: %s", action)
+
+                action_type = action.get("action", "fail")
+                reason = action.get("reason", "")
+
+                # 3. Check if task is done or failed
+                if action_type == "done":
+                    msg = f"Done. {reason}" if reason else "Done."
+                    logger.info("Agent completed: %s", msg)
+                    self.voice.speak(msg)
+                    break
+
+                if action_type == "fail":
+                    msg = f"I couldn't do that. {reason}" if reason else "I couldn't figure out how to do that."
+                    logger.warning("Agent failed: %s", msg)
+                    self.voice.speak(msg)
+                    break
+
+                # 4. Safety check
+                safe, safety_reason = self.safety.check_action(action, screen_text)
+                if not safe:
+                    self.voice.speak(safety_reason)
+                    logger.warning("Safety blocked action: %s", safety_reason)
+                    break
+
+                # 5. Execute the action
+                if action_type == "click":
+                    target = action.get("target", "")
+                    coords = self.eyes.find_text(target)
+                    if coords:
+                        self.computer.click(*coords)
+                    else:
+                        self.voice.speak(f"I can't find '{target}' on the screen.")
+                        break
+
+                elif action_type == "type":
+                    value = action.get("value", "")
+                    self.computer.type_text(value)
+
+                elif action_type == "press":
+                    key = action.get("value", "enter")
+                    self.computer.press_key(key)
+
+                elif action_type == "hotkey":
+                    keys_str = action.get("value", "")
+                    keys = [k.strip() for k in keys_str.split("+")]
+                    self.computer.hotkey(*keys)
+
+                elif action_type == "scroll":
+                    direction = action.get("value", "down")
+                    clicks = 3 if direction == "down" else -3
+                    self.computer.scroll(clicks)
+
+                else:
+                    logger.warning("Unknown action type: %s", action_type)
+                    break
+
+                # Wait for the screen to update before next step
+                time.sleep(1.5)
+
+            except Exception as e:
+                logger.error("Agent loop error at step %d: %s", step + 1, e, exc_info=True)
+                self.voice.speak("Something went wrong while controlling the computer.")
+                break
+        else:
+            self.voice.speak(f"Reached the maximum of {max_steps} steps. Stopping.")
+            logger.info("Agent loop hit max steps (%d).", max_steps)
+
+        # Unload eyes if configured
+        if self.eyes.unload_after_use:
+            self.eyes.unload()
 
     def run(self):
         """Main loop: listen -> think -> speak -> repeat."""
@@ -137,7 +240,25 @@ class VoiceAgent:
                 # Try action handler first (open apps, websites, etc.)
                 handled, action_response = self.actions.try_handle(text)
                 if handled:
-                    if action_response:
+                    if action_response == "__EYES__":
+                        self.voice.speak("Let me look at your screen.")
+                        try:
+                            description = self.eyes.look()
+                            logger.info("Screen: %s", description[:100])
+                            self.voice.speak(description)
+                        except Exception as e:
+                            logger.error("Vision error: %s", e)
+                            self.voice.speak("Sorry, I had trouble seeing the screen.")
+                    elif action_response == "__COMPUTER__":
+                        if not self.computer.enabled:
+                            self.voice.speak(
+                                "Computer control is disabled. "
+                                "Enable it in settings dot yaml."
+                            )
+                        else:
+                            self.voice.speak("On it.")
+                            self._agent_loop(text)
+                    elif action_response:
                         logger.info("Action: %s", action_response)
                         self.voice.speak(action_response)
                     continue
@@ -218,6 +339,9 @@ def _run_text_mode(config_path: str | None):
 
     actions = Actions()
     brain = Brain(config)
+    computer = Computer(config)
+    eyes = Eyes(config)
+    safety = Safety(config)
 
     print("\n" + "=" * 50)
     print("  Atlas - Local AI Agent (Text Mode)")
@@ -243,7 +367,20 @@ def _run_text_mode(config_path: str | None):
             # Try action handler first
             handled, action_response = actions.try_handle(user_input)
             if handled:
-                if action_response:
+                if action_response == "__EYES__":
+                    print("Atlas: Let me read the screen...\n")
+                    try:
+                        description = eyes.look()
+                        print(f"Atlas: {description}\n")
+                    except Exception as e:
+                        print(f"Atlas: Sorry, I had trouble reading the screen. {e}\n")
+                elif action_response == "__COMPUTER__":
+                    if not computer.enabled:
+                        print("Atlas: Computer control is disabled. Enable it in settings.yaml\n")
+                    else:
+                        print("Atlas: On it.\n")
+                        _text_agent_loop(user_input, brain, computer, eyes, safety)
+                elif action_response:
                     print(f"Atlas: {action_response}\n")
                 continue
 
@@ -253,6 +390,73 @@ def _run_text_mode(config_path: str | None):
         except (KeyboardInterrupt, EOFError):
             print("\nGoodbye!")
             break
+
+
+def _text_agent_loop(task: str, brain: Brain, computer: Computer, eyes: Eyes, safety: Safety):
+    """Agent loop for text mode — same logic as VoiceAgent._agent_loop but prints."""
+    max_steps = safety.max_steps
+
+    for step in range(max_steps):
+        print(f"  [Step {step + 1}/{max_steps}]")
+
+        try:
+            screen_text = eyes.read_screen()
+            if not screen_text:
+                print("Atlas: I can't read the screen right now.\n")
+                break
+
+            action = brain.plan_action(task, screen_text)
+            print(f"  Action: {action}")
+
+            action_type = action.get("action", "fail")
+            reason = action.get("reason", "")
+
+            if action_type == "done":
+                print(f"Atlas: Done. {reason}\n")
+                break
+
+            if action_type == "fail":
+                print(f"Atlas: Couldn't do that. {reason}\n")
+                break
+
+            safe, safety_reason = safety.check_action(action, screen_text)
+            if not safe:
+                print(f"Atlas: {safety_reason}\n")
+                break
+
+            if action_type == "click":
+                target = action.get("target", "")
+                coords = eyes.find_text(target)
+                if coords:
+                    computer.click(*coords)
+                else:
+                    print(f"Atlas: Can't find '{target}' on screen.\n")
+                    break
+            elif action_type == "type":
+                computer.type_text(action.get("value", ""))
+            elif action_type == "press":
+                computer.press_key(action.get("value", "enter"))
+            elif action_type == "hotkey":
+                keys = [k.strip() for k in action.get("value", "").split("+")]
+                computer.hotkey(*keys)
+            elif action_type == "scroll":
+                direction = action.get("value", "down")
+                computer.scroll(3 if direction == "down" else -3)
+            else:
+                print(f"Atlas: Unknown action type: {action_type}\n")
+                break
+
+            import time
+            time.sleep(1.5)
+
+        except Exception as e:
+            print(f"Atlas: Error during computer control: {e}\n")
+            break
+    else:
+        print(f"Atlas: Reached max {max_steps} steps. Stopping.\n")
+
+    if eyes.unload_after_use:
+        eyes.unload()
 
 
 if __name__ == "__main__":

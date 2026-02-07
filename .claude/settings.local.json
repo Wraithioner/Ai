@@ -11,7 +11,9 @@
       "Bash(\"C:\\\\Users\\\\avax4\\\\AppData\\\\Local\\\\Programs\\\\Ollama\\\\ollama.exe\" pull llama3.1:8b)",
       "Bash(python:*)",
       "Bash(dir:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(.venvScriptspip install mss Pillow)",
+      "Bash(.venv/Scripts/pip install:*)"
     ]
   }
 }

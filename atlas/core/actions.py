@@ -117,6 +117,27 @@ class Actions:
             today = datetime.now().strftime("%A, %B %d, %Y")
             return True, f"Today is {today}."
 
+        # --- "what do you see" / "look at my screen" ---
+        if re.search(
+            r"what do you see|what(?:'s| is) on (?:my |the )?screen|"
+            r"look at (?:my |the )?screen|describe (?:my |the )?screen|"
+            r"what are you looking at|take a screenshot|"
+            r"what(?:'s| is) on (?:my |the )?(?:display|monitor)|"
+            r"can you see (?:my |the )?screen|read (?:my |the )?screen",
+            lower,
+        ):
+            return True, "__EYES__"
+
+        # --- computer control commands ---
+        if re.search(
+            r"click (?:on |the )?|log ?in(?:to| to)?|sign ?in(?:to| to)?|"
+            r"type .+ (?:in|into|on)|go to .+ and (?:click|type|enter)|"
+            r"fill .+ out|navigate to .+ and (?:click|type)|"
+            r"scroll (?:up|down)|press (?:enter|tab|escape)",
+            lower,
+        ):
+            return True, "__COMPUTER__"
+
         # Not an action
         return False, None
 

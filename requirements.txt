@@ -8,3 +8,8 @@ openai-whisper
 piper-tts
 torchaudio
 PyAudio
+mss
+Pillow
+easyocr
+pyautogui
+pyperclip
