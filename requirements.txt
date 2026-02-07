@@ -1,8 +1,10 @@
+transformers
+accelerate
+huggingface-hub
+torch
+numpy
+pyyaml
 openai-whisper
 piper-tts
-torch
 torchaudio
-numpy
 PyAudio
-requests
-pyyaml

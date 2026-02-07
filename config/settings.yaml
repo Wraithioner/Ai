@@ -2,16 +2,13 @@
 # Local AI Voice Agent - Configuration
 # ============================================
 
-# --- LLM Settings (Ollama) ---
+# --- LLM Settings (runs directly, no Ollama needed) ---
 llm:
-  # Model to use. Popular choices:
-  #   llama3.1:8b    - Great general purpose (needs ~6GB RAM)
-  #   mistral:7b     - Fast and smart (needs ~5GB RAM)
-  #   gemma2:9b      - Good for conversation (needs ~7GB RAM)
-  #   phi3:mini      - Lightweight (needs ~3GB RAM)
-  #   llama3.1:70b   - Best quality, needs beefy GPU (~40GB VRAM)
-  model: "llama3.1:8b"
-  ollama_host: "http://localhost:11434"
+  # HuggingFace model to use. Auto-downloaded on first run.
+  #   Qwen/Qwen2.5-1.5B-Instruct  - Smart, fast (~3GB RAM) (default)
+  #   TinyLlama/TinyLlama-1.1B-Chat-v1.0 - Tiny, very fast (~2GB RAM)
+  #   microsoft/Phi-3-mini-4k-instruct    - Great quality (~8GB RAM)
+  model: "Qwen/Qwen2.5-1.5B-Instruct"
   # System prompt that defines your AI's personality
   system_prompt: |
     Your name is Atlas. You are a helpful personal AI assistant running locally
@@ -21,11 +18,11 @@ llm:
     ask for something detailed. You can help with questions, tasks, coding,
     writing, math, and general knowledge.
   # Max tokens in response
-  max_tokens: 512
+  max_tokens: 256
   # Temperature (0.0 = deterministic, 1.0 = creative)
   temperature: 0.7
   # How many previous exchanges to remember
-  context_window: 20
+  context_window: 10
 
 # --- Speech-to-Text Settings (Whisper) ---
 stt:
@@ -76,4 +73,4 @@ audio:
 # --- Logging ---
 logging:
   level: "INFO"  # DEBUG, INFO, WARNING, ERROR
-  file: "~/.local/share/ai-agent/agent.log"
+  file: "logs/atlas.log"

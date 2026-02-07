@@ -1,20 +1,12 @@
 """Text-to-Speech module - speaks responses out loud using Piper TTS."""
 
-import io
 import logging
-import struct
 import subprocess
-import sys
-import wave
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from atlas.core.config import VOICE_CACHE_DIR
 
-# Cross-platform voice model directory
-if sys.platform == "win32":
-    PIPER_VOICES_DIR = Path.home() / "AppData" / "Local" / "piper-voices"
-else:
-    PIPER_VOICES_DIR = Path.home() / ".local" / "share" / "piper-voices"
+logger = logging.getLogger(__name__)
 
 # Map of friendly voice names to download URLs
 VOICE_URLS = {
@@ -47,24 +39,21 @@ class Voice:
 
     def initialize(self):
         """Ensure Piper is installed and voice model is available."""
-        # Check if piper is installed
         try:
-            result = subprocess.run(
+            subprocess.run(
                 ["piper", "--version"],
                 capture_output=True, text=True, timeout=5,
             )
             logger.info("Piper TTS found.")
         except FileNotFoundError:
             logger.error(
-                "Piper TTS not found. Install it with: "
-                "pip install piper-tts"
+                "Piper TTS not found. Install it with: pip install piper-tts"
             )
             raise RuntimeError("Piper TTS is not installed.")
 
-        # Set up voice model path
-        PIPER_VOICES_DIR.mkdir(parents=True, exist_ok=True)
-        self.model_path = PIPER_VOICES_DIR / f"{self.voice_name}.onnx"
-        self.config_path = PIPER_VOICES_DIR / f"{self.voice_name}.onnx.json"
+        VOICE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self.model_path = VOICE_CACHE_DIR / f"{self.voice_name}.onnx"
+        self.config_path = VOICE_CACHE_DIR / f"{self.voice_name}.onnx.json"
 
         if not self.model_path.exists():
             self._download_voice()
@@ -75,12 +64,11 @@ class Voice:
 
         model_url = VOICE_URLS.get(self.voice_name)
         if not model_url:
-            # Construct URL from voice name pattern
             parts = self.voice_name.split("-")
-            lang = parts[0]  # e.g., en_US
-            lang_short = lang.split("_")[0]  # e.g., en
-            name = parts[1]  # e.g., amy
-            quality = parts[2]  # e.g., medium
+            lang = parts[0]
+            lang_short = lang.split("_")[0]
+            name = parts[1]
+            quality = parts[2]
             model_url = (
                 f"https://huggingface.co/rhasspy/piper-voices/resolve/main/"
                 f"{lang_short}/{lang}/{name}/{quality}/{self.voice_name}.onnx"
@@ -108,7 +96,6 @@ class Voice:
         logger.debug("Speaking: %s", text[:80])
 
         try:
-            # Use piper to generate raw audio
             piper_cmd = [
                 "piper",
                 "--model", str(self.model_path),
@@ -124,7 +111,6 @@ class Voice:
                 stderr=subprocess.PIPE,
             )
 
-            # Send text to piper and get raw audio back
             raw_audio, _ = piper_proc.communicate(
                 input=text.encode("utf-8"), timeout=60
             )
@@ -133,9 +119,7 @@ class Voice:
                 logger.warning("Piper produced no audio output.")
                 return
 
-            # Play audio using PyAudio (cross-platform)
             self._play_raw_audio(raw_audio)
-
             logger.debug("Finished speaking.")
 
         except subprocess.TimeoutExpired:
@@ -148,21 +132,16 @@ class Voice:
         """Play raw PCM audio data using PyAudio (works on Windows, Mac, Linux)."""
         import pyaudio
 
-        sample_rate = 22050
-        channels = 1
-        sample_width = 2  # 16-bit
-
         pa = pyaudio.PyAudio()
         stream = pa.open(
-            format=pa.get_format_from_width(sample_width),
-            channels=channels,
-            rate=sample_rate,
+            format=pa.get_format_from_width(2),
+            channels=1,
+            rate=22050,
             output=True,
             output_device_index=self.output_device,
         )
 
         try:
-            # Play in chunks to allow for smoother playback
             chunk_size = 4096
             for i in range(0, len(raw_audio), chunk_size):
                 stream.write(raw_audio[i:i + chunk_size])

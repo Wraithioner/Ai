@@ -1,109 +1,107 @@
 # Atlas - Local AI Voice Agent
 
-A personal AI assistant that runs **100% on your PC**. No API keys, no cloud, no subscriptions.
+A personal AI assistant that runs **100% on your PC**. No API keys, no cloud, no subscriptions, no Ollama.
 
 Say **"Atlas"** to get its attention, then talk naturally. It listens, thinks, and speaks back.
 
 ## What It Does
 
 - **Listens** to your voice using your microphone (Whisper speech-to-text)
-- **Thinks** using a local LLM running on your hardware (Ollama + Llama 3.1)
+- **Thinks** using a local LLM running directly in Python (trainable)
 - **Speaks** responses out loud (Piper TTS)
-- **Starts automatically** when your PC boots (systemd service)
-- **Stops** when your PC shuts down
 - **Remembers** conversation context within a session
-
-## Requirements
-
-- **OS:** Windows 10/11 or Linux (Ubuntu/Debian, Fedora, or Arch)
-- **RAM:** 8GB minimum, 16GB recommended
-- **Storage:** ~10GB for models
-- **Microphone:** Any USB or built-in mic
-- **Speakers:** Any audio output
-- **GPU:** Optional but recommended (NVIDIA with CUDA for faster inference)
+- **Trainable** - fine-tune Atlas's brain with your own data
+- **Self-contained** - no external servers, no third-party dependencies at runtime
 
 ## Quick Start
 
 ### Windows
 
 ```cmd
-:: 1. Clone and run the installer
+:: 1. Clone and install
 git clone <this-repo> && cd Ai
 scripts\install.bat
 
-:: 2. Start Atlas
-.venv\Scripts\activate
-python -m agent.main
+:: 2. Start Atlas (text mode)
+python -m atlas.main --text-mode
 
-:: 3. Or test in text mode first (no mic needed)
-python -m agent.main --text-mode
+:: 3. Train Atlas's brain (optional)
+python -m atlas.main --train
 ```
 
 ### Linux
 
 ```bash
-# 1. Clone and run the installer
+# 1. Clone and install
 git clone <this-repo> && cd Ai
 bash scripts/install.sh
 
-# 2. Start Atlas
-source .venv/bin/activate
-python -m agent.main
+# 2. Start Atlas (text mode)
+python -m atlas.main --text-mode
 
-# 3. Or test in text mode first (no mic needed)
-python -m agent.main --text-mode
+# 3. Train Atlas's brain (optional)
+python -m atlas.main --train
 ```
 
-The installer handles everything: Ollama, AI model download, Python environment, and optional auto-start service (Linux).
-
-## Architecture
-
-```
-You speak
-    |
-    v
-[Microphone] --> [Silero VAD] --> [Whisper STT] --> text
-                                                      |
-                                                      v
-                                              [Ollama + LLama 3.1]
-                                                      |
-                                                      v
-                                                   response
-                                                      |
-                                                      v
-                                              [Piper TTS] --> [Speakers]
-                                                                  |
-                                                                  v
-                                                            You hear the reply
-```
+Or install manually: `pip install transformers accelerate huggingface-hub torch numpy pyyaml`
 
 ## Project Structure
 
 ```
 Ai/
-├── agent/
-│   ├── main.py      # Main loop: listen -> think -> speak
-│   ├── brain.py     # LLM interface (Ollama)
-│   ├── ears.py      # Speech-to-text (Whisper + VAD)
-│   ├── voice.py     # Text-to-speech (Piper)
-│   └── config.py    # Configuration loader
+├── atlas/                      # Source code
+│   ├── core/                   # Core components
+│   │   ├── brain.py            #   LLM engine (runs model directly)
+│   │   ├── ears.py             #   Speech-to-text (Whisper + VAD)
+│   │   ├── voice.py            #   Text-to-speech (Piper)
+│   │   └── config.py           #   Configuration & path management
+│   ├── training/               # Fine-tuning tools
+│   │   └── train.py            #   Training script
+│   └── main.py                 # Entry point
 ├── config/
-│   └── settings.yaml  # All settings in one place
+│   └── settings.yaml           # All settings in one place
+├── data/
+│   └── training/               # Your training data (JSONL files)
+│       └── atlas_personality.jsonl
+├── models/                     # Fine-tuned models saved here
+├── logs/                       # Log files
 ├── scripts/
-│   ├── install.sh     # Linux installer
-│   ├── install.bat    # Windows installer
-│   └── uninstall.sh   # Remove the service (Linux)
+│   ├── install.bat             # Windows installer
+│   ├── install.sh              # Linux installer
+│   └── uninstall.sh            # Remove service (Linux)
 └── requirements.txt
 ```
+
+## Training Atlas's Brain
+
+You can fine-tune Atlas to have a unique personality, custom knowledge, and specific behaviors.
+
+### 1. Add training data
+
+Edit `data/training/atlas_personality.jsonl` — each line is a conversation example:
+
+```json
+{"messages": [{"role": "system", "content": "Your name is Atlas."}, {"role": "user", "content": "What's your name?"}, {"role": "assistant", "content": "I'm Atlas, your personal AI."}]}
+```
+
+### 2. Run training
+
+```
+python -m atlas.main --train
+```
+
+### 3. Done
+
+Atlas automatically detects and uses the fine-tuned model from `models/atlas-brain/`.
 
 ## Configuration
 
 Edit `config/settings.yaml` to customize:
 
-- **LLM model** - switch between llama3.1, mistral, phi3, etc.
+- **LLM model** - base model to use or fine-tune
 - **Voice** - change the TTS voice
 - **Whisper model size** - trade speed for accuracy
-- **System prompt** - define your AI's personality
+- **System prompt** - define Atlas's personality
 - **Silence threshold** - how long to wait after you stop talking
 
 ## Voice Commands
@@ -115,54 +113,12 @@ Edit `config/settings.yaml` to customize:
 | "goodbye" / "shut down" | Stops the agent |
 | "reset" / "forget everything" | Clears conversation memory |
 
-## Service Management
-
-If you installed the auto-start service:
-
-```bash
-sudo systemctl start ai-agent     # Start now
-sudo systemctl stop ai-agent      # Stop
-sudo systemctl restart ai-agent   # Restart
-sudo systemctl status ai-agent    # Check status
-journalctl -u ai-agent -f         # Live logs
-```
-
-## Choosing a Model
+## Choosing a Base Model
 
 | Model | RAM Needed | Speed | Quality |
 |---|---|---|---|
-| `phi3:mini` | ~3GB | Fast | Good for basic chat |
-| `mistral:7b` | ~5GB | Fast | Great all-rounder |
-| `llama3.1:8b` | ~6GB | Medium | Best at this size (default) |
-| `gemma2:9b` | ~7GB | Medium | Good conversation |
-| `llama3.1:70b` | ~40GB | Slow | Best quality, needs big GPU |
+| `TinyLlama/TinyLlama-1.1B-Chat-v1.0` | ~2GB | Fast | Basic chat |
+| `Qwen/Qwen2.5-1.5B-Instruct` | ~3GB | Fast | Good quality (default) |
+| `microsoft/Phi-3-mini-4k-instruct` | ~8GB | Medium | Great quality |
 
-Switch models in `config/settings.yaml` or pull a new one:
-
-```bash
-ollama pull mistral:7b
-```
-
-## Troubleshooting
-
-**"Cannot connect to Ollama"**
-```bash
-ollama serve  # Start the Ollama server
-```
-
-**"No microphone detected"**
-```bash
-arecord -l  # List audio devices
-# Update input_device in config/settings.yaml
-```
-
-**"Model not found"**
-```bash
-ollama list          # See installed models
-ollama pull llama3.1:8b  # Download the model
-```
-
-**Slow responses?**
-- Use a smaller model (`phi3:mini` or `mistral:7b`)
-- Use Whisper `tiny` instead of `base`
-- If you have an NVIDIA GPU, set `device: "cuda"` in settings.yaml
+Switch models in `config/settings.yaml` — they auto-download on first run.

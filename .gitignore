@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Atlas models (too large for git)
+models/atlas-brain/
+models/checkpoints/
+!models/.gitkeep
+
+# Logs
+logs/*.log
+!logs/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

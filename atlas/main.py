@@ -7,12 +7,12 @@ import sys
 import time
 from pathlib import Path
 
-from agent.config import load_config
-from agent.brain import Brain
-from agent.ears import Ears
-from agent.voice import Voice
+from atlas.core.config import load_config
+from atlas.core.brain import Brain
+from atlas.core.ears import Ears
+from atlas.core.voice import Voice
 
-logger = logging.getLogger("agent")
+logger = logging.getLogger("atlas")
 
 
 class VoiceAgent:
@@ -51,20 +51,12 @@ class VoiceAgent:
     def initialize(self):
         """Initialize all components."""
         logger.info("=" * 50)
-        logger.info("  Local AI Voice Agent - Starting Up")
+        logger.info("  Atlas - Local AI Voice Agent - Starting Up")
         logger.info("=" * 50)
 
-        # Check Ollama connection
-        logger.info("Checking Ollama connection...")
-        if not self.brain.check_connection():
-            logger.error(
-                "Cannot connect to Ollama or model not found.\n"
-                "1. Install Ollama: curl -fsSL https://ollama.com/install.sh | sh\n"
-                "2. Start Ollama: ollama serve\n"
-                "3. Pull a model: ollama pull %s",
-                self.brain.model,
-            )
-            sys.exit(1)
+        # Load the LLM brain
+        logger.info("Loading AI model (first run will download it)...")
+        self.brain.initialize()
 
         # Load speech-to-text
         logger.info("Initializing speech recognition...")
@@ -111,7 +103,6 @@ class VoiceAgent:
 
                 # Strip the wake word from the input so the LLM gets clean text
                 if self.wake_word_enabled:
-                    # Remove the wake word (case-insensitive) from the text
                     clean = re.sub(
                         rf"\b{re.escape(self.wake_word)}\b[,]?\s*",
                         "",
@@ -120,7 +111,6 @@ class VoiceAgent:
                     ).strip()
                     if clean:
                         text = clean
-                    # If only the wake word was said with nothing else, acknowledge
                     else:
                         self.voice.speak("Yes? I'm listening.")
                         continue
@@ -152,7 +142,7 @@ class VoiceAgent:
                 self.running = False
             except Exception as e:
                 logger.error("Error in main loop: %s", e, exc_info=True)
-                time.sleep(1)  # Prevent tight error loops
+                time.sleep(1)
 
         logger.info("Agent stopped.")
 
@@ -161,7 +151,7 @@ def main():
     """Entry point."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Local AI Voice Agent")
+    parser = argparse.ArgumentParser(description="Atlas - Local AI Voice Agent")
     parser.add_argument(
         "-c", "--config",
         help="Path to configuration file",
@@ -172,9 +162,17 @@ def main():
         action="store_true",
         help="Run in text mode (type instead of speak)",
     )
+    parser.add_argument(
+        "--train",
+        action="store_true",
+        help="Fine-tune Atlas's brain with your training data",
+    )
     args = parser.parse_args()
 
-    if args.text_mode:
+    if args.train:
+        from atlas.training.train import run_training
+        run_training(args.config)
+    elif args.text_mode:
         _run_text_mode(args.config)
     else:
         agent = VoiceAgent(args.config)
@@ -186,21 +184,20 @@ def _run_text_mode(config_path: str | None):
     """Run in text-only mode for testing without a microphone."""
     config = load_config(config_path)
 
-    # Set up basic logging
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
     brain = Brain(config)
-    if not brain.check_connection():
-        logger.error("Cannot connect to Ollama. Make sure it's running.")
-        sys.exit(1)
 
     print("\n" + "=" * 50)
     print("  Atlas - Local AI Agent (Text Mode)")
-    print("  Type 'quit' to exit, 'reset' to clear memory")
+    print("  Loading model (first run will download it)...")
     print("=" * 50 + "\n")
+
+    brain.initialize()
+    print("Atlas is ready!\n")
 
     while True:
         try:
