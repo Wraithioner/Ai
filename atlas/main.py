@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from atlas.core.config import load_config
+from atlas.core.actions import Actions
 from atlas.core.brain import Brain
 from atlas.core.ears import Ears
 from atlas.core.voice import Voice
@@ -21,6 +22,7 @@ class VoiceAgent:
     def __init__(self, config_path: str | None = None):
         self.config = load_config(config_path)
         self._setup_logging()
+        self.actions = Actions()
         self.brain = Brain(self.config)
         self.ears = Ears(self.config)
         self.voice = Voice(self.config)
@@ -132,6 +134,14 @@ class VoiceAgent:
                         self.voice.speak("Yes? I'm listening.")
                         continue
 
+                # Try action handler first (open apps, websites, etc.)
+                handled, action_response = self.actions.try_handle(text)
+                if handled:
+                    if action_response:
+                        logger.info("Action: %s", action_response)
+                        self.voice.speak(action_response)
+                    continue
+
                 # Handle special commands
                 lower = text.lower().strip()
                 if lower in ("goodbye", "shut down", "turn off", "exit", "quit"):
@@ -206,6 +216,7 @@ def _run_text_mode(config_path: str | None):
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
+    actions = Actions()
     brain = Brain(config)
 
     print("\n" + "=" * 50)
@@ -227,6 +238,13 @@ def _run_text_mode(config_path: str | None):
             if user_input.lower() in ("reset", "clear"):
                 brain.reset_conversation()
                 print("Memory cleared.\n")
+                continue
+
+            # Try action handler first
+            handled, action_response = actions.try_handle(user_input)
+            if handled:
+                if action_response:
+                    print(f"Atlas: {action_response}\n")
                 continue
 
             response = brain.think(user_input)

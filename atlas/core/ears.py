@@ -127,6 +127,7 @@ class Ears:
             audio_np,
             language=self.language,
             fp16=(self.device == "cuda"),
+            initial_prompt="Atlas is a voice assistant. The user speaks to Atlas.",
         )
         text = result["text"].strip()
 
