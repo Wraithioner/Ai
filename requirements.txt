@@ -1,0 +1,8 @@
+openai-whisper
+piper-tts
+torch
+torchaudio
+numpy
+PyAudio
+requests
+pyyaml
