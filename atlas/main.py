@@ -4,8 +4,11 @@ import logging
 import re
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
+
+import numpy as np
 
 from atlas.core.config import load_config
 from atlas.core.actions import Actions
@@ -79,17 +82,42 @@ class VoiceAgent:
     def _agent_loop(self, task: str):
         """Run the observe-plan-execute loop for computer control tasks.
 
-        Steps per iteration:
-        1. Read screen text (OCR)
-        2. Ask Brain to plan next action
-        3. Safety check the action
-        4. Execute the action
-        5. Wait for screen to update, then repeat
+        Can be interrupted by:
+        - Saying "Atlas stop" (voice interrupt listener runs in background)
+        - Pressing Escape key
+        - Ctrl+C
         """
         max_steps = self.safety.max_steps
         logger.info("Agent loop started for task: %s (max %d steps)", task, max_steps)
 
+        # Stop flag — set by interrupt listener or keyboard
+        stop_event = threading.Event()
+
+        # Start a background voice listener that checks for "stop" commands
+        interrupt_thread = threading.Thread(
+            target=self._listen_for_stop,
+            args=(stop_event,),
+            daemon=True,
+        )
+        interrupt_thread.start()
+
+        # Also listen for Escape key press
+        keyboard_thread = threading.Thread(
+            target=self._listen_for_escape,
+            args=(stop_event,),
+            daemon=True,
+        )
+        keyboard_thread.start()
+
+        self.voice.speak("Say stop or press Escape to cancel.")
+
         for step in range(max_steps):
+            # Check stop flag before each step
+            if stop_event.is_set():
+                self.voice.speak("Stopped.")
+                logger.info("Agent loop interrupted by user.")
+                break
+
             logger.info("Agent step %d/%d", step + 1, max_steps)
 
             try:
@@ -99,9 +127,17 @@ class VoiceAgent:
                     self.voice.speak("I can't read the screen right now.")
                     break
 
+                if stop_event.is_set():
+                    self.voice.speak("Stopped.")
+                    break
+
                 # 2. Plan — ask the Brain what to do next
                 action = self.brain.plan_action(task, screen_text)
                 logger.info("Planned action: %s", action)
+
+                if stop_event.is_set():
+                    self.voice.speak("Stopped.")
+                    break
 
                 action_type = action.get("action", "fail")
                 reason = action.get("reason", "")
@@ -169,9 +205,111 @@ class VoiceAgent:
             self.voice.speak(f"Reached the maximum of {max_steps} steps. Stopping.")
             logger.info("Agent loop hit max steps (%d).", max_steps)
 
+        # Signal threads to stop and clean up
+        stop_event.set()
+
         # Unload eyes if configured
         if self.eyes.unload_after_use:
             self.eyes.unload()
+
+    def _listen_for_stop(self, stop_event: threading.Event):
+        """Background listener that checks for voice 'stop' commands during agent loop."""
+        import pyaudio
+        import torch
+
+        try:
+            pa = pyaudio.PyAudio()
+            stream = pa.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=16000,
+                input=True,
+                frames_per_buffer=512,
+            )
+
+            frames = []
+            silent_chunks = 0
+            speech_detected = False
+            max_silent = int(1.0 * 16000 / 512)  # 1 second of silence
+
+            while not stop_event.is_set():
+                try:
+                    data = stream.read(512, exception_on_overflow=False)
+                except Exception:
+                    break
+
+                audio_chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+                tensor = torch.FloatTensor(audio_chunk)
+
+                try:
+                    speech_prob = self.ears.vad_model(tensor, 16000).item()
+                except Exception:
+                    continue
+
+                if speech_prob > 0.5:
+                    speech_detected = True
+                    silent_chunks = 0
+                    frames.append(data)
+                elif speech_detected:
+                    frames.append(data)
+                    silent_chunks += 1
+                    if silent_chunks >= max_silent:
+                        # Got a speech segment — quick transcribe to check for stop
+                        raw = b"".join(frames)
+                        audio_np = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+
+                        result = self.ears.whisper_model.transcribe(
+                            audio_np,
+                            language="en",
+                            fp16=False,
+                        )
+                        heard = result["text"].strip().lower()
+                        logger.debug("Interrupt listener heard: %s", heard)
+
+                        stop_words = ["stop", "atlas stop", "cancel", "abort", "halt", "nevermind", "never mind"]
+                        for sw in stop_words:
+                            if sw in heard:
+                                logger.info("Stop command detected: '%s'", heard)
+                                stop_event.set()
+                                break
+
+                        # Reset for next utterance
+                        frames = []
+                        silent_chunks = 0
+                        speech_detected = False
+
+            stream.stop_stream()
+            stream.close()
+            pa.terminate()
+
+        except Exception as e:
+            logger.debug("Stop listener error (non-fatal): %s", e)
+
+    @staticmethod
+    def _listen_for_escape(stop_event: threading.Event):
+        """Background listener for Escape key press during agent loop."""
+        try:
+            import msvcrt  # Windows only
+            while not stop_event.is_set():
+                if msvcrt.kbhit():
+                    key = msvcrt.getch()
+                    if key == b'\x1b':  # Escape key
+                        logger.info("Escape key pressed — stopping agent loop.")
+                        stop_event.set()
+                        break
+                time.sleep(0.1)
+        except ImportError:
+            # Non-Windows: try reading stdin
+            import select
+            while not stop_event.is_set():
+                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+                if ready:
+                    char = sys.stdin.read(1)
+                    if char == '\x1b':
+                        stop_event.set()
+                        break
+        except Exception as e:
+            logger.debug("Escape listener error (non-fatal): %s", e)
 
     def run(self):
         """Main loop: listen -> think -> speak -> repeat."""
@@ -263,8 +401,13 @@ class VoiceAgent:
                         self.voice.speak(action_response)
                     continue
 
-                # Handle special commands
+                # Handle stop / interrupt commands
                 lower = text.lower().strip()
+                stop_words = ["stop", "cancel", "abort", "halt", "nevermind", "never mind", "shut up"]
+                if any(sw in lower for sw in stop_words):
+                    self.voice.speak("Okay.")
+                    continue
+
                 if lower in ("goodbye", "shut down", "turn off", "exit", "quit"):
                     farewell = "Goodbye! Shutting down."
                     logger.info(farewell)

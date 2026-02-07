@@ -8,7 +8,7 @@ llm:
   #   Qwen/Qwen2.5-7B-Instruct    - Smart, GPU recommended (~14GB VRAM)
   #   Qwen/Qwen2.5-1.5B-Instruct  - Lighter, works on CPU (~3GB RAM)
   #   TinyLlama/TinyLlama-1.1B-Chat-v1.0 - Tiny, very fast (~2GB RAM)
-  model: "Qwen/Qwen2.5-7B-Instruct"
+  model: "Qwen/Qwen2.5-1.5B-Instruct"
   # System prompt that defines your AI's personality
   system_prompt: |
     Your name is Atlas. You are a helpful personal AI assistant running locally
