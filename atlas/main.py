@@ -97,18 +97,35 @@ class VoiceAgent:
                 lower = text.lower().strip()
 
                 # Wake word filtering — only respond when the user says "Atlas"
-                if self.wake_word_enabled and self.wake_word not in lower:
-                    logger.debug("Ignored (no wake word): %s", text)
-                    continue
+                # Use fuzzy matching to catch common misheard variants
+                if self.wake_word_enabled:
+                    wake_variants = [
+                        self.wake_word, "at last", "at less", "adless",
+                        "atlast", "atlass", "atlus", "at las",
+                    ]
+                    found_wake = False
+                    for variant in wake_variants:
+                        if variant in lower:
+                            found_wake = True
+                            break
+                    if not found_wake:
+                        logger.debug("Ignored (no wake word): %s", text)
+                        continue
 
                 # Strip the wake word from the input so the LLM gets clean text
                 if self.wake_word_enabled:
-                    clean = re.sub(
-                        rf"\b{re.escape(self.wake_word)}\b[,]?\s*",
-                        "",
-                        text,
-                        flags=re.IGNORECASE,
-                    ).strip()
+                    # Remove any wake word variant from the text
+                    clean = text
+                    for variant in [
+                        self.wake_word, "at last", "at less", "adless",
+                        "atlast", "atlass", "atlus", "at las",
+                    ]:
+                        clean = re.sub(
+                            rf"\b{re.escape(variant)}\b[,]?\s*",
+                            "",
+                            clean,
+                            flags=re.IGNORECASE,
+                        ).strip()
                     if clean:
                         text = clean
                     else:

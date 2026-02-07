@@ -1,14 +1,18 @@
-"""Text-to-Speech module - speaks responses out loud using Piper TTS."""
+"""Text-to-Speech module - speaks responses out loud.
+
+Uses Piper TTS (Linux) or pyttsx3/Windows SAPI (Windows) as a fallback.
+"""
 
 import logging
 import subprocess
+import sys
 from pathlib import Path
 
 from atlas.core.config import VOICE_CACHE_DIR
 
 logger = logging.getLogger(__name__)
 
-# Map of friendly voice names to download URLs
+# Map of friendly voice names to download URLs (for Piper)
 VOICE_URLS = {
     "en_US-amy-medium": (
         "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
@@ -26,7 +30,7 @@ VOICE_URLS = {
 
 
 class Voice:
-    """Converts text to speech using Piper TTS (fully offline)."""
+    """Converts text to speech and plays it through the speakers."""
 
     def __init__(self, config: dict):
         tts_cfg = config["tts"]
@@ -36,20 +40,37 @@ class Voice:
         self.output_device = audio_cfg.get("output_device")
         self.model_path = None
         self.config_path = None
+        self._use_piper = False
+        self._use_sapi = False
 
     def initialize(self):
-        """Ensure Piper is installed and voice model is available."""
+        """Set up TTS engine. Tries Piper first, falls back to pyttsx3."""
+        # Try Piper TTS first
+        if self._try_piper():
+            self._use_piper = True
+            logger.info("Using Piper TTS engine.")
+            return
+
+        # Fall back to Windows SAPI directly
+        if self._try_sapi():
+            self._use_sapi = True
+            logger.info("Using Windows SAPI TTS engine.")
+            return
+
+        raise RuntimeError(
+            "No TTS engine available. Install pywin32: pip install pywin32"
+        )
+
+    def _try_piper(self) -> bool:
+        """Check if Piper TTS is available."""
         try:
             subprocess.run(
                 ["piper", "--version"],
                 capture_output=True, text=True, timeout=5,
             )
-            logger.info("Piper TTS found.")
-        except FileNotFoundError:
-            logger.error(
-                "Piper TTS not found. Install it with: pip install piper-tts"
-            )
-            raise RuntimeError("Piper TTS is not installed.")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            logger.debug("Piper TTS not found, will try fallback.")
+            return False
 
         VOICE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         self.model_path = VOICE_CACHE_DIR / f"{self.voice_name}.onnx"
@@ -58,8 +79,31 @@ class Voice:
         if not self.model_path.exists():
             self._download_voice()
 
+        return True
+
+    def _try_sapi(self) -> bool:
+        """Check if Windows SAPI is available (via win32com)."""
+        try:
+            import win32com.client
+            speaker = win32com.client.Dispatch("SAPI.SpVoice")
+            # Quick test — just check we can access Rate
+            _ = speaker.Rate
+            return True
+        except Exception:
+            pass
+
+        # Fallback: try comtypes directly (already installed via pyttsx3)
+        try:
+            import comtypes.client
+            speaker = comtypes.client.CreateObject("SAPI.SpVoice")
+            _ = speaker.Rate
+            return True
+        except Exception as e:
+            logger.debug("Windows SAPI not available: %s", e)
+            return False
+
     def _download_voice(self):
-        """Download the voice model from HuggingFace."""
+        """Download the Piper voice model from HuggingFace."""
         import requests
 
         model_url = VOICE_URLS.get(self.voice_name)
@@ -95,6 +139,13 @@ class Voice:
 
         logger.debug("Speaking: %s", text[:80])
 
+        if self._use_piper:
+            self._speak_piper(text)
+        elif self._use_sapi:
+            self._speak_sapi(text)
+
+    def _speak_piper(self, text: str):
+        """Speak using Piper TTS."""
         try:
             piper_cmd = [
                 "piper",
@@ -126,10 +177,30 @@ class Voice:
             logger.warning("Speech generation timed out.")
             piper_proc.kill()
         except Exception as e:
-            logger.error("TTS error: %s", e)
+            logger.error("Piper TTS error: %s", e)
+
+    def _speak_sapi(self, text: str):
+        """Speak using Windows SAPI directly (no pyttsx3 wrapper)."""
+        try:
+            logger.info("Speaking out loud: %s", text[:80])
+            try:
+                import win32com.client
+                speaker = win32com.client.Dispatch("SAPI.SpVoice")
+            except Exception:
+                import comtypes.client
+                speaker = comtypes.client.CreateObject("SAPI.SpVoice")
+
+            # Rate: -10 (slow) to 10 (fast), 0 is default
+            speaker.Rate = int((self.rate - 1.0) * 5)
+            speaker.Volume = 100
+            # Speak synchronously (blocks until done)
+            speaker.Speak(text)
+            logger.info("Finished speaking.")
+        except Exception as e:
+            logger.error("SAPI TTS error: %s", e, exc_info=True)
 
     def _play_raw_audio(self, raw_audio: bytes):
-        """Play raw PCM audio data using PyAudio (works on Windows, Mac, Linux)."""
+        """Play raw PCM audio data using PyAudio (for Piper output)."""
         import pyaudio
 
         pa = pyaudio.PyAudio()

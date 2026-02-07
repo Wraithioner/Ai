@@ -1,9 +1,6 @@
 """Speech-to-Text module - listens to the microphone and transcribes speech."""
 
-import io
 import logging
-import tempfile
-import wave
 
 import numpy as np
 
@@ -22,7 +19,8 @@ class Ears:
         self.language = stt_cfg.get("language", "en")
         self.device = stt_cfg.get("device", "cpu")
         self.sample_rate = audio_cfg.get("sample_rate", 16000)
-        self.chunk_size = audio_cfg.get("chunk_size", 1024)
+        # Silero VAD requires exactly 512 samples at 16kHz (or 256 at 8kHz)
+        self.chunk_size = 512 if self.sample_rate == 16000 else 256
         self.input_device = audio_cfg.get("input_device")
         self.silence_threshold = vad_cfg.get("silence_threshold", 1.5)
         self.min_speech_duration = vad_cfg.get("min_speech_duration", 0.5)
@@ -119,27 +117,18 @@ class Ears:
             logger.debug("Speech too short (%.2fs), ignoring.", duration)
             return None
 
-        # Write to temporary WAV file for Whisper
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tmp_path = tmp.name
-            with wave.open(tmp, "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)  # 16-bit
-                wf.setframerate(self.sample_rate)
-                wf.writeframes(b"".join(frames))
+        # Convert raw audio frames to numpy array for Whisper (no ffmpeg needed)
+        raw_audio = b"".join(frames)
+        audio_np = np.frombuffer(raw_audio, dtype=np.int16).astype(np.float32) / 32768.0
 
-        # Transcribe
+        # Transcribe directly from numpy array
         logger.debug("Transcribing audio (%.2fs)...", duration)
         result = self.whisper_model.transcribe(
-            tmp_path,
+            audio_np,
             language=self.language,
             fp16=(self.device == "cuda"),
         )
         text = result["text"].strip()
-
-        # Clean up temp file
-        import os
-        os.unlink(tmp_path)
 
         if text:
             logger.info("Heard: %s", text)

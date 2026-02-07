@@ -32,7 +32,7 @@ stt:
   # small  = better accuracy (~2GB RAM)
   # medium = great accuracy (~5GB RAM)
   # large-v3 = best accuracy (~10GB RAM)
-  model: "base"
+  model: "small"
   # Language (use "en" for English-only model which is faster)
   language: "en"
   # Device: "cpu" or "cuda" (GPU)
