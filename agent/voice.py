@@ -2,13 +2,19 @@
 
 import io
 import logging
+import struct
 import subprocess
+import sys
 import wave
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-PIPER_VOICES_DIR = Path.home() / ".local" / "share" / "piper-voices"
+# Cross-platform voice model directory
+if sys.platform == "win32":
+    PIPER_VOICES_DIR = Path.home() / "AppData" / "Local" / "piper-voices"
+else:
+    PIPER_VOICES_DIR = Path.home() / ".local" / "share" / "piper-voices"
 
 # Map of friendly voice names to download URLs
 VOICE_URLS = {
@@ -102,7 +108,7 @@ class Voice:
         logger.debug("Speaking: %s", text[:80])
 
         try:
-            # Use piper to generate WAV audio, pipe to aplay
+            # Use piper to generate raw audio
             piper_cmd = [
                 "piper",
                 "--model", str(self.model_path),
@@ -111,47 +117,56 @@ class Voice:
             if self.rate != 1.0:
                 piper_cmd.extend(["--length-scale", str(1.0 / self.rate)])
 
-            aplay_cmd = [
-                "aplay",
-                "-r", "22050",
-                "-f", "S16_LE",
-                "-t", "raw",
-                "-c", "1",
-                "-q",  # quiet
-            ]
-
-            # Pipe piper output directly to aplay
             piper_proc = subprocess.Popen(
                 piper_cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
-            aplay_proc = subprocess.Popen(
-                aplay_cmd,
-                stdin=piper_proc.stdout,
-                stderr=subprocess.PIPE,
+
+            # Send text to piper and get raw audio back
+            raw_audio, _ = piper_proc.communicate(
+                input=text.encode("utf-8"), timeout=60
             )
 
-            # Send text to piper
-            piper_proc.stdin.write(text.encode("utf-8"))
-            piper_proc.stdin.close()
+            if not raw_audio:
+                logger.warning("Piper produced no audio output.")
+                return
 
-            # Wait for playback to finish
-            aplay_proc.wait(timeout=60)
-            piper_proc.wait(timeout=10)
+            # Play audio using PyAudio (cross-platform)
+            self._play_raw_audio(raw_audio)
 
             logger.debug("Finished speaking.")
 
-        except FileNotFoundError as e:
-            if "aplay" in str(e):
-                logger.error(
-                    "aplay not found. Install alsa-utils: "
-                    "sudo apt install alsa-utils"
-                )
-            else:
-                raise
         except subprocess.TimeoutExpired:
-            logger.warning("Speech playback timed out.")
+            logger.warning("Speech generation timed out.")
+            piper_proc.kill()
         except Exception as e:
             logger.error("TTS error: %s", e)
+
+    def _play_raw_audio(self, raw_audio: bytes):
+        """Play raw PCM audio data using PyAudio (works on Windows, Mac, Linux)."""
+        import pyaudio
+
+        sample_rate = 22050
+        channels = 1
+        sample_width = 2  # 16-bit
+
+        pa = pyaudio.PyAudio()
+        stream = pa.open(
+            format=pa.get_format_from_width(sample_width),
+            channels=channels,
+            rate=sample_rate,
+            output=True,
+            output_device_index=self.output_device,
+        )
+
+        try:
+            # Play in chunks to allow for smoother playback
+            chunk_size = 4096
+            for i in range(0, len(raw_audio), chunk_size):
+                stream.write(raw_audio[i:i + chunk_size])
+        finally:
+            stream.stop_stream()
+            stream.close()
+            pa.terminate()

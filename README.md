@@ -1,8 +1,8 @@
-# Local AI Voice Agent
+# Atlas - Local AI Voice Agent
 
 A personal AI assistant that runs **100% on your PC**. No API keys, no cloud, no subscriptions.
 
-Talk to it with your voice. It listens, thinks, and speaks back.
+Say **"Atlas"** to get its attention, then talk naturally. It listens, thinks, and speaks back.
 
 ## What It Does
 
@@ -15,7 +15,7 @@ Talk to it with your voice. It listens, thinks, and speaks back.
 
 ## Requirements
 
-- **OS:** Linux (Ubuntu/Debian, Fedora, or Arch)
+- **OS:** Windows 10/11 or Linux (Ubuntu/Debian, Fedora, or Arch)
 - **RAM:** 8GB minimum, 16GB recommended
 - **Storage:** ~10GB for models
 - **Microphone:** Any USB or built-in mic
@@ -24,12 +24,29 @@ Talk to it with your voice. It listens, thinks, and speaks back.
 
 ## Quick Start
 
+### Windows
+
+```cmd
+:: 1. Clone and run the installer
+git clone <this-repo> && cd Ai
+scripts\install.bat
+
+:: 2. Start Atlas
+.venv\Scripts\activate
+python -m agent.main
+
+:: 3. Or test in text mode first (no mic needed)
+python -m agent.main --text-mode
+```
+
+### Linux
+
 ```bash
 # 1. Clone and run the installer
 git clone <this-repo> && cd Ai
 bash scripts/install.sh
 
-# 2. Start the agent
+# 2. Start Atlas
 source .venv/bin/activate
 python -m agent.main
 
@@ -37,7 +54,7 @@ python -m agent.main
 python -m agent.main --text-mode
 ```
 
-The installer handles everything: system packages, Ollama, AI model download, Python environment, and optional auto-start service.
+The installer handles everything: Ollama, AI model download, Python environment, and optional auto-start service (Linux).
 
 ## Architecture
 
@@ -73,8 +90,9 @@ Ai/
 ├── config/
 │   └── settings.yaml  # All settings in one place
 ├── scripts/
-│   ├── install.sh     # One-click installer
-│   └── uninstall.sh   # Remove the service
+│   ├── install.sh     # Linux installer
+│   ├── install.bat    # Windows installer
+│   └── uninstall.sh   # Remove the service (Linux)
 └── requirements.txt
 ```
 
@@ -92,7 +110,8 @@ Edit `config/settings.yaml` to customize:
 
 | Say | Action |
 |---|---|
-| *anything* | AI responds by voice |
+| "Atlas, ..." | Atlas listens and responds |
+| "Atlas" (alone) | Atlas acknowledges and waits |
 | "goodbye" / "shut down" | Stops the agent |
 | "reset" / "forget everything" | Clears conversation memory |
 

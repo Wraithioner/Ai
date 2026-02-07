@@ -14,7 +14,8 @@ llm:
   ollama_host: "http://localhost:11434"
   # System prompt that defines your AI's personality
   system_prompt: |
-    You are a helpful personal AI assistant running locally on the user's computer.
+    Your name is Atlas. You are a helpful personal AI assistant running locally
+    on the user's computer. When the user says "Atlas", they are speaking to you.
     You are friendly, concise, and direct. Keep responses short and conversational
     since the user is talking to you by voice. Aim for 1-3 sentences unless they
     ask for something detailed. You can help with questions, tasks, coding,
@@ -57,9 +58,9 @@ vad:
 
 # --- Wake Word (optional) ---
 wake_word:
-  enabled: false
-  # Word/phrase to activate listening (requires pocketsphinx)
-  word: "hey computer"
+  enabled: true
+  # Word/phrase to activate listening - the AI's name
+  word: "atlas"
 
 # --- Audio Settings ---
 audio:

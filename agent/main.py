@@ -1,6 +1,7 @@
 """Main voice agent - the loop that ties everything together."""
 
 import logging
+import re
 import signal
 import sys
 import time
@@ -24,6 +25,11 @@ class VoiceAgent:
         self.ears = Ears(self.config)
         self.voice = Voice(self.config)
         self.running = False
+
+        # Wake word / name detection
+        ww_cfg = self.config.get("wake_word", {})
+        self.wake_word_enabled = ww_cfg.get("enabled", False)
+        self.wake_word = ww_cfg.get("word", "atlas").lower()
 
     def _setup_logging(self):
         log_cfg = self.config.get("logging", {})
@@ -80,10 +86,11 @@ class VoiceAgent:
             self.running = False
 
         signal.signal(signal.SIGINT, shutdown)
-        signal.signal(signal.SIGTERM, shutdown)
+        if hasattr(signal, "SIGTERM"):
+            signal.signal(signal.SIGTERM, shutdown)
 
         # Greet the user
-        greeting = "Hello! I'm your local AI assistant. I'm listening."
+        greeting = "Hello! I'm Atlas, your local AI assistant. Say my name when you want to talk to me."
         logger.info(greeting)
         self.voice.speak(greeting)
 
@@ -94,6 +101,29 @@ class VoiceAgent:
 
                 if text is None:
                     continue
+
+                lower = text.lower().strip()
+
+                # Wake word filtering — only respond when the user says "Atlas"
+                if self.wake_word_enabled and self.wake_word not in lower:
+                    logger.debug("Ignored (no wake word): %s", text)
+                    continue
+
+                # Strip the wake word from the input so the LLM gets clean text
+                if self.wake_word_enabled:
+                    # Remove the wake word (case-insensitive) from the text
+                    clean = re.sub(
+                        rf"\b{re.escape(self.wake_word)}\b[,]?\s*",
+                        "",
+                        text,
+                        flags=re.IGNORECASE,
+                    ).strip()
+                    if clean:
+                        text = clean
+                    # If only the wake word was said with nothing else, acknowledge
+                    else:
+                        self.voice.speak("Yes? I'm listening.")
+                        continue
 
                 # Handle special commands
                 lower = text.lower().strip()
@@ -168,7 +198,7 @@ def _run_text_mode(config_path: str | None):
         sys.exit(1)
 
     print("\n" + "=" * 50)
-    print("  Local AI Agent - Text Mode")
+    print("  Atlas - Local AI Agent (Text Mode)")
     print("  Type 'quit' to exit, 'reset' to clear memory")
     print("=" * 50 + "\n")
 
@@ -186,7 +216,7 @@ def _run_text_mode(config_path: str | None):
                 continue
 
             response = brain.think(user_input)
-            print(f"AI: {response}\n")
+            print(f"Atlas: {response}\n")
 
         except (KeyboardInterrupt, EOFError):
             print("\nGoodbye!")
