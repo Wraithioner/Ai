@@ -4,11 +4,8 @@ import logging
 import re
 import signal
 import sys
-import threading
 import time
 from pathlib import Path
-
-import numpy as np
 
 from atlas.core.config import load_config
 from atlas.core.actions import Actions
@@ -80,44 +77,11 @@ class VoiceAgent:
         logger.info("All systems ready!")
 
     def _agent_loop(self, task: str):
-        """Run the observe-plan-execute loop for computer control tasks.
-
-        Can be interrupted by:
-        - Saying "Atlas stop" (voice interrupt listener runs in background)
-        - Pressing Escape key
-        - Ctrl+C
-        """
+        """Run the observe-plan-execute loop for computer control tasks."""
         max_steps = self.safety.max_steps
         logger.info("Agent loop started for task: %s (max %d steps)", task, max_steps)
 
-        # Stop flag — set by interrupt listener or keyboard
-        stop_event = threading.Event()
-
-        # Start a background voice listener that checks for "stop" commands
-        interrupt_thread = threading.Thread(
-            target=self._listen_for_stop,
-            args=(stop_event,),
-            daemon=True,
-        )
-        interrupt_thread.start()
-
-        # Also listen for Escape key press
-        keyboard_thread = threading.Thread(
-            target=self._listen_for_escape,
-            args=(stop_event,),
-            daemon=True,
-        )
-        keyboard_thread.start()
-
-        self.voice.speak("Say stop or press Escape to cancel.")
-
         for step in range(max_steps):
-            # Check stop flag before each step
-            if stop_event.is_set():
-                self.voice.speak("Stopped.")
-                logger.info("Agent loop interrupted by user.")
-                break
-
             logger.info("Agent step %d/%d", step + 1, max_steps)
 
             try:
@@ -127,17 +91,9 @@ class VoiceAgent:
                     self.voice.speak("I can't read the screen right now.")
                     break
 
-                if stop_event.is_set():
-                    self.voice.speak("Stopped.")
-                    break
-
                 # 2. Plan — ask the Brain what to do next
                 action = self.brain.plan_action(task, screen_text)
                 logger.info("Planned action: %s", action)
-
-                if stop_event.is_set():
-                    self.voice.speak("Stopped.")
-                    break
 
                 action_type = action.get("action", "fail")
                 reason = action.get("reason", "")
@@ -205,114 +161,120 @@ class VoiceAgent:
             self.voice.speak(f"Reached the maximum of {max_steps} steps. Stopping.")
             logger.info("Agent loop hit max steps (%d).", max_steps)
 
-        # Signal threads to stop and clean up
-        stop_event.set()
-
         # Unload eyes if configured
         if self.eyes.unload_after_use:
             self.eyes.unload()
 
-    def _listen_for_stop(self, stop_event: threading.Event):
-        """Background listener that checks for voice 'stop' commands during agent loop."""
-        import pyaudio
-        import torch
+    def _speak_interruptible(self, text: str):
+        """Speak text asynchronously while polling the always-on mic.
 
-        try:
-            pa = pyaudio.PyAudio()
-            stream = pa.open(
-                format=pyaudio.paInt16,
-                channels=1,
-                rate=16000,
-                input=True,
-                frames_per_buffer=512,
-            )
+        Starts SAPI async speech, then polls each audio chunk in
+        real-time on the persistent mic stream. If the user speaks
+        loud enough to pass the high VAD threshold (0.85), it records
+        the utterance, transcribes it, and either stops or processes it.
+        """
+        if not text:
+            return
 
-            frames = []
-            silent_chunks = 0
-            speech_detected = False
-            max_silent = int(1.0 * 16000 / 512)  # 1 second of silence
+        # Start speaking without blocking
+        self.voice.speak_async(text)
 
-            while not stop_event.is_set():
+        # Poll the always-on mic continuously while Atlas speaks
+        while self.voice.is_speaking():
+            heard = self.ears.poll_for_speech(vad_threshold=0.85)
+
+            if heard:
+                if self._is_stop_command(heard):
+                    self.voice.stop()
+                    logger.info("User interrupted with stop: %s", heard)
+                    self.voice.speak("Okay.")
+                    return
+                else:
+                    self.voice.stop()
+                    logger.info("User interrupted with new input: %s", heard)
+                    self._handle_input(heard)
+                    return
+
+    def _handle_input(self, text: str):
+        """Process a single user input (used by main loop and interrupt handler)."""
+        lower = text.lower().strip()
+
+        # Try action handler first
+        handled, action_response = self.actions.try_handle(text)
+        if handled:
+            if action_response == "__EYES__":
+                self.voice.speak("Let me look at your screen.")
                 try:
-                    data = stream.read(512, exception_on_overflow=False)
-                except Exception:
-                    break
+                    description = self.eyes.look()
+                    logger.info("Screen: %s", description[:100])
+                    self._speak_interruptible(description)
+                except Exception as e:
+                    logger.error("Vision error: %s", e)
+                    self.voice.speak("Sorry, I had trouble seeing the screen.")
+            elif action_response == "__COMPUTER__":
+                if not self.computer.enabled:
+                    self.voice.speak(
+                        "Computer control is disabled. "
+                        "Enable it in settings dot yaml."
+                    )
+                else:
+                    self.voice.speak("On it.")
+                    self._agent_loop(text)
+            elif action_response:
+                logger.info("Action: %s", action_response)
+                self.voice.speak(action_response)
+            return
 
-                audio_chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
-                tensor = torch.FloatTensor(audio_chunk)
+        if lower in ("goodbye", "shut down", "turn off", "exit", "quit"):
+            farewell = "Goodbye! Shutting down."
+            logger.info(farewell)
+            self.voice.speak(farewell)
+            self.running = False
+            return
 
-                try:
-                    speech_prob = self.ears.vad_model(tensor, 16000).item()
-                except Exception:
-                    continue
+        if lower in ("reset", "clear memory", "forget everything"):
+            self.brain.reset_conversation()
+            self.voice.speak("Memory cleared. Starting fresh.")
+            return
 
-                if speech_prob > 0.5:
-                    speech_detected = True
-                    silent_chunks = 0
-                    frames.append(data)
-                elif speech_detected:
-                    frames.append(data)
-                    silent_chunks += 1
-                    if silent_chunks >= max_silent:
-                        # Got a speech segment — quick transcribe to check for stop
-                        raw = b"".join(frames)
-                        audio_np = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        # Think (send to LLM)
+        logger.info("Thinking...")
+        response = self.brain.think(text)
+        logger.info("Response: %s", response[:100])
 
-                        result = self.ears.whisper_model.transcribe(
-                            audio_np,
-                            language="en",
-                            fp16=False,
-                        )
-                        heard = result["text"].strip().lower()
-                        logger.debug("Interrupt listener heard: %s", heard)
+        # Speak interruptibly
+        self._speak_interruptible(response)
 
-                        stop_words = ["stop", "atlas stop", "cancel", "abort", "halt", "nevermind", "never mind"]
-                        for sw in stop_words:
-                            if sw in heard:
-                                logger.info("Stop command detected: '%s'", heard)
-                                stop_event.set()
-                                break
-
-                        # Reset for next utterance
-                        frames = []
-                        silent_chunks = 0
-                        speech_detected = False
-
-            stream.stop_stream()
-            stream.close()
-            pa.terminate()
-
-        except Exception as e:
-            logger.debug("Stop listener error (non-fatal): %s", e)
-
-    @staticmethod
-    def _listen_for_escape(stop_event: threading.Event):
-        """Background listener for Escape key press during agent loop."""
-        try:
-            import msvcrt  # Windows only
-            while not stop_event.is_set():
-                if msvcrt.kbhit():
-                    key = msvcrt.getch()
-                    if key == b'\x1b':  # Escape key
-                        logger.info("Escape key pressed — stopping agent loop.")
-                        stop_event.set()
-                        break
-                time.sleep(0.1)
-        except ImportError:
-            # Non-Windows: try reading stdin
-            import select
-            while not stop_event.is_set():
-                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
-                if ready:
-                    char = sys.stdin.read(1)
-                    if char == '\x1b':
-                        stop_event.set()
-                        break
-        except Exception as e:
-            logger.debug("Escape listener error (non-fatal): %s", e)
+    def _is_stop_command(self, text: str) -> bool:
+        """Check if text is a stop/interrupt command."""
+        lower = text.lower().strip()
+        stop_words = [
+            "stop", "cancel", "abort", "halt",
+            "nevermind", "never mind", "shut up",
+        ]
+        if any(sw in lower for sw in stop_words):
+            return True
+        # Check after stripping wake word
+        if self.wake_word_enabled:
+            for variant in [
+                self.wake_word, "at last", "at less", "adless",
+                "atlast", "atlass", "atlus", "at las",
+            ]:
+                lower = re.sub(
+                    rf"\b{re.escape(variant)}\b[,]?\s*",
+                    "", lower, flags=re.IGNORECASE,
+                ).strip()
+            if any(sw in lower for sw in stop_words):
+                return True
+        return False
 
     def run(self):
-        """Main loop: listen -> think -> speak -> repeat."""
+        """Main loop: listen -> think -> speak -> repeat.
+
+        The mic is always on (opened once at startup). While Atlas
+        speaks, the mic polls every chunk (~32ms) for interrupts.
+        Say "stop" to cancel speech, or say something new.
+        """
         self.running = True
 
         # Handle graceful shutdown
@@ -331,7 +293,7 @@ class VoiceAgent:
 
         while self.running:
             try:
-                # Listen for speech
+                # Listen for speech (blocks until speech detected)
                 text = self.ears.listen()
 
                 if text is None:
@@ -339,8 +301,14 @@ class VoiceAgent:
 
                 lower = text.lower().strip()
 
-                # Wake word filtering — only respond when the user says "Atlas"
-                # Use fuzzy matching to catch common misheard variants
+                # Check for stop/interrupt FIRST
+                if self._is_stop_command(text):
+                    self.voice.stop()
+                    logger.info("User said stop: %s", text)
+                    self.voice.speak("Okay.")
+                    continue
+
+                # Wake word filtering
                 if self.wake_word_enabled:
                     wake_variants = [
                         self.wake_word, "at last", "at less", "adless",
@@ -355,9 +323,8 @@ class VoiceAgent:
                         logger.debug("Ignored (no wake word): %s", text)
                         continue
 
-                # Strip the wake word from the input so the LLM gets clean text
+                # Strip the wake word
                 if self.wake_word_enabled:
-                    # Remove any wake word variant from the text
                     clean = text
                     for variant in [
                         self.wake_word, "at last", "at less", "adless",
@@ -375,59 +342,15 @@ class VoiceAgent:
                         self.voice.speak("Yes? I'm listening.")
                         continue
 
-                # Try action handler first (open apps, websites, etc.)
-                handled, action_response = self.actions.try_handle(text)
-                if handled:
-                    if action_response == "__EYES__":
-                        self.voice.speak("Let me look at your screen.")
-                        try:
-                            description = self.eyes.look()
-                            logger.info("Screen: %s", description[:100])
-                            self.voice.speak(description)
-                        except Exception as e:
-                            logger.error("Vision error: %s", e)
-                            self.voice.speak("Sorry, I had trouble seeing the screen.")
-                    elif action_response == "__COMPUTER__":
-                        if not self.computer.enabled:
-                            self.voice.speak(
-                                "Computer control is disabled. "
-                                "Enable it in settings dot yaml."
-                            )
-                        else:
-                            self.voice.speak("On it.")
-                            self._agent_loop(text)
-                    elif action_response:
-                        logger.info("Action: %s", action_response)
-                        self.voice.speak(action_response)
-                    continue
+                    # Check if cleaned text is a stop command
+                    if self._is_stop_command(clean):
+                        self.voice.stop()
+                        logger.info("User said stop: %s", text)
+                        self.voice.speak("Okay.")
+                        continue
 
-                # Handle stop / interrupt commands
-                lower = text.lower().strip()
-                stop_words = ["stop", "cancel", "abort", "halt", "nevermind", "never mind", "shut up"]
-                if any(sw in lower for sw in stop_words):
-                    self.voice.speak("Okay.")
-                    continue
-
-                if lower in ("goodbye", "shut down", "turn off", "exit", "quit"):
-                    farewell = "Goodbye! Shutting down."
-                    logger.info(farewell)
-                    self.voice.speak(farewell)
-                    self.running = False
-                    break
-
-                if lower in ("reset", "clear memory", "forget everything"):
-                    self.brain.reset_conversation()
-                    msg = "Memory cleared. Starting fresh."
-                    self.voice.speak(msg)
-                    continue
-
-                # Think (send to LLM)
-                logger.info("Thinking...")
-                response = self.brain.think(text)
-                logger.info("Response: %s", response[:100])
-
-                # Speak the response
-                self.voice.speak(response)
+                # Handle the input (actions, LLM, etc.)
+                self._handle_input(text)
 
             except KeyboardInterrupt:
                 self.running = False
@@ -435,6 +358,8 @@ class VoiceAgent:
                 logger.error("Error in main loop: %s", e, exc_info=True)
                 time.sleep(1)
 
+        # Close the mic stream
+        self.ears.shutdown()
         logger.info("Agent stopped.")
 
 

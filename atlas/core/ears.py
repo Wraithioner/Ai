@@ -8,7 +8,11 @@ logger = logging.getLogger(__name__)
 
 
 class Ears:
-    """Captures audio from the microphone and converts speech to text using Whisper."""
+    """Captures audio from the microphone and converts speech to text using Whisper.
+
+    The mic stream opens once during initialize() and stays open for the
+    entire session. Both listen() and poll_for_speech() use the same stream.
+    """
 
     def __init__(self, config: dict):
         stt_cfg = config["stt"]
@@ -27,10 +31,11 @@ class Ears:
 
         self.whisper_model = None
         self.vad_model = None
-        self.audio = None
+        self._pa = None
+        self._stream = None
 
     def initialize(self):
-        """Load Whisper model and VAD model."""
+        """Load Whisper model, VAD model, and open the mic stream."""
         logger.info("Loading Whisper model '%s'...", self.model_name)
         import whisper
         self.whisper_model = whisper.load_model(
@@ -54,16 +59,15 @@ class Ears:
         ) = self.vad_utils
         logger.info("VAD model loaded.")
 
-    def listen(self) -> str | None:
-        """
-        Listen to the microphone, detect speech, and transcribe it.
-        Returns the transcribed text or None if no speech was detected.
-        """
-        import pyaudio
-        import torch
+        # Open mic once — stays open for the entire session
+        self._open_stream()
 
-        pa = pyaudio.PyAudio()
-        stream = pa.open(
+    def _open_stream(self):
+        """Open a persistent mic stream."""
+        import pyaudio
+
+        self._pa = pyaudio.PyAudio()
+        self._stream = self._pa.open(
             format=pyaudio.paInt16,
             channels=1,
             rate=self.sample_rate,
@@ -71,6 +75,56 @@ class Ears:
             frames_per_buffer=self.chunk_size,
             input_device_index=self.input_device,
         )
+        logger.info("Mic stream opened (always-on).")
+
+    def shutdown(self):
+        """Close the mic stream. Called when Atlas shuts down."""
+        if self._stream is not None:
+            try:
+                self._stream.stop_stream()
+                self._stream.close()
+            except Exception:
+                pass
+            self._stream = None
+        if self._pa is not None:
+            try:
+                self._pa.terminate()
+            except Exception:
+                pass
+            self._pa = None
+        logger.info("Mic stream closed.")
+
+    def _read_chunk(self):
+        """Read one chunk from the always-on mic stream."""
+        return self._stream.read(self.chunk_size, exception_on_overflow=False)
+
+    def _transcribe(self, frames: list[bytes]) -> str | None:
+        """Transcribe recorded audio frames with Whisper."""
+        raw_audio = b"".join(frames)
+        audio_np = np.frombuffer(raw_audio, dtype=np.int16).astype(np.float32) / 32768.0
+
+        duration = len(frames) * self.chunk_size / self.sample_rate
+        logger.debug("Transcribing audio (%.2fs)...", duration)
+
+        result = self.whisper_model.transcribe(
+            audio_np,
+            language=self.language,
+            fp16=(self.device == "cuda"),
+            initial_prompt="Atlas is a voice assistant. The user speaks to Atlas.",
+        )
+        text = result["text"].strip()
+        return text if text else None
+
+    def listen(self, vad_threshold: float = 0.5) -> str | None:
+        """Wait for speech on the always-on mic, record it, and transcribe.
+
+        Blocks until speech is detected and the user stops talking.
+        Uses the persistent stream — no open/close overhead.
+
+        Args:
+            vad_threshold: VAD probability threshold (default 0.5 for normal listening).
+        """
+        import torch
 
         logger.debug("Listening for speech...")
         frames = []
@@ -82,17 +136,14 @@ class Ears:
 
         try:
             while True:
-                data = stream.read(self.chunk_size, exception_on_overflow=False)
-                audio_chunk = np.frombuffer(data, dtype=np.int16).astype(
-                    np.float32
-                )
-                audio_chunk /= 32768.0  # Normalize to [-1, 1]
+                data = self._read_chunk()
+                audio_chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32)
+                audio_chunk /= 32768.0
 
-                # Check for voice activity
                 tensor = torch.FloatTensor(audio_chunk)
                 speech_prob = self.vad_model(tensor, self.sample_rate).item()
 
-                if speech_prob > 0.5:
+                if speech_prob > vad_threshold:
                     speech_detected = True
                     silent_chunks = 0
                     frames.append(data)
@@ -100,37 +151,84 @@ class Ears:
                     frames.append(data)
                     silent_chunks += 1
                     if silent_chunks >= max_silent:
-                        break  # Enough silence after speech, stop recording
+                        break
         except KeyboardInterrupt:
             pass
-        finally:
-            stream.stop_stream()
-            stream.close()
-            pa.terminate()
 
         if not speech_detected or not frames:
             return None
 
-        # Check minimum duration
         duration = len(frames) * self.chunk_size / self.sample_rate
         if duration < self.min_speech_duration:
             logger.debug("Speech too short (%.2fs), ignoring.", duration)
             return None
 
-        # Convert raw audio frames to numpy array for Whisper (no ffmpeg needed)
-        raw_audio = b"".join(frames)
-        audio_np = np.frombuffer(raw_audio, dtype=np.int16).astype(np.float32) / 32768.0
-
-        # Transcribe directly from numpy array
-        logger.debug("Transcribing audio (%.2fs)...", duration)
-        result = self.whisper_model.transcribe(
-            audio_np,
-            language=self.language,
-            fp16=(self.device == "cuda"),
-            initial_prompt="Atlas is a voice assistant. The user speaks to Atlas.",
-        )
-        text = result["text"].strip()
-
+        text = self._transcribe(frames)
         if text:
             logger.info("Heard: %s", text)
-        return text if text else None
+        return text
+
+    def poll_for_speech(self, vad_threshold: float = 0.85) -> str | None:
+        """Read one chunk from the live mic and check for speech.
+
+        Returns None instantly if no speech in this chunk.
+        If speech IS detected, keeps reading until silence, then transcribes.
+
+        Uses the persistent stream — no open/close overhead.
+
+        Args:
+            vad_threshold: VAD probability threshold (0.85 = strict, ignores speakers).
+        """
+        import torch
+
+        if self._stream is None:
+            return None
+
+        try:
+            data = self._read_chunk()
+        except Exception:
+            return None
+
+        audio_chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32)
+        audio_chunk /= 32768.0
+
+        tensor = torch.FloatTensor(audio_chunk)
+        speech_prob = self.vad_model(tensor, self.sample_rate).item()
+
+        if speech_prob <= vad_threshold:
+            return None
+
+        # Speech detected — record until silence
+        logger.debug("Speech detected (prob=%.2f), recording...", speech_prob)
+        frames = [data]
+        silent_chunks = 0
+        max_silent = int(0.5 * self.sample_rate / self.chunk_size)
+
+        while True:
+            try:
+                data = self._read_chunk()
+            except Exception:
+                break
+
+            audio_chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32)
+            audio_chunk /= 32768.0
+            tensor = torch.FloatTensor(audio_chunk)
+            prob = self.vad_model(tensor, self.sample_rate).item()
+
+            frames.append(data)
+
+            if prob > 0.5:
+                silent_chunks = 0
+            else:
+                silent_chunks += 1
+                if silent_chunks >= max_silent:
+                    break
+
+        duration_s = len(frames) * self.chunk_size / self.sample_rate
+        if duration_s < 0.3:
+            return None
+
+        text = self._transcribe(frames)
+        if text:
+            logger.info("Interrupt-heard: %s", text)
+        return text

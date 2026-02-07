@@ -42,6 +42,8 @@ class Voice:
         self.config_path = None
         self._use_piper = False
         self._use_sapi = False
+        self._speaking = False
+        self._sapi_speaker = None
 
     def initialize(self):
         """Set up TTS engine. Tries Piper first, falls back to pyttsx3."""
@@ -82,21 +84,19 @@ class Voice:
         return True
 
     def _try_sapi(self) -> bool:
-        """Check if Windows SAPI is available (via win32com)."""
+        """Check if Windows SAPI is available and create a persistent speaker."""
         try:
             import win32com.client
-            speaker = win32com.client.Dispatch("SAPI.SpVoice")
-            # Quick test — just check we can access Rate
-            _ = speaker.Rate
+            self._sapi_speaker = win32com.client.Dispatch("SAPI.SpVoice")
+            _ = self._sapi_speaker.Rate
             return True
         except Exception:
             pass
 
-        # Fallback: try comtypes directly (already installed via pyttsx3)
         try:
             import comtypes.client
-            speaker = comtypes.client.CreateObject("SAPI.SpVoice")
-            _ = speaker.Rate
+            self._sapi_speaker = comtypes.client.CreateObject("SAPI.SpVoice")
+            _ = self._sapi_speaker.Rate
             return True
         except Exception as e:
             logger.debug("Windows SAPI not available: %s", e)
@@ -133,7 +133,7 @@ class Voice:
         logger.info("Voice model downloaded to %s", self.model_path)
 
     def speak(self, text: str):
-        """Convert text to speech and play it through the speakers."""
+        """Convert text to speech and play it through the speakers (blocks)."""
         if not text:
             return
 
@@ -143,6 +143,16 @@ class Voice:
             self._speak_piper(text)
         elif self._use_sapi:
             self._speak_sapi(text)
+
+    def speak_async(self, text: str):
+        """Start speaking without blocking. Use is_speaking() / wait_until_done() / stop()."""
+        if not text:
+            return
+        if self._use_sapi:
+            self._speak_sapi_start(text)
+        else:
+            # Piper doesn't support async, fall back to blocking
+            self.speak(text)
 
     def _speak_piper(self, text: str):
         """Speak using Piper TTS."""
@@ -180,24 +190,72 @@ class Voice:
             logger.error("Piper TTS error: %s", e)
 
     def _speak_sapi(self, text: str):
-        """Speak using Windows SAPI directly (no pyttsx3 wrapper)."""
+        """Speak using Windows SAPI — blocks until speech finishes or stop() is called."""
+        self._speak_sapi_start(text)
+        self.wait_until_done()
+
+    def _speak_sapi_start(self, text: str):
+        """Start speaking asynchronously (returns immediately)."""
         try:
             logger.info("Speaking out loud: %s", text[:80])
-            try:
-                import win32com.client
-                speaker = win32com.client.Dispatch("SAPI.SpVoice")
-            except Exception:
-                import comtypes.client
-                speaker = comtypes.client.CreateObject("SAPI.SpVoice")
+
+            speaker = self._sapi_speaker
+            if speaker is None:
+                logger.error("SAPI speaker not initialized.")
+                return
+
+            self._speaking = True
 
             # Rate: -10 (slow) to 10 (fast), 0 is default
             speaker.Rate = int((self.rate - 1.0) * 5)
             speaker.Volume = 100
-            # Speak synchronously (blocks until done)
-            speaker.Speak(text)
-            logger.info("Finished speaking.")
+
+            # SVSFlagsAsync = 1, speak without blocking
+            speaker.Speak(text, 1)
+
         except Exception as e:
+            self._speaking = False
             logger.error("SAPI TTS error: %s", e, exc_info=True)
+
+    def wait_until_done(self):
+        """Block until speech finishes or stop() is called."""
+        import time
+        while self._speaking:
+            try:
+                done = self._sapi_speaker.WaitUntilDone(50)
+                if done:
+                    break
+            except Exception:
+                break
+        self._speaking = False
+        logger.info("Finished speaking.")
+
+    def is_speaking(self) -> bool:
+        """Check if currently speaking (polls SAPI status)."""
+        if not self._speaking:
+            return False
+        if self._sapi_speaker is not None:
+            try:
+                # WaitUntilDone(0) returns immediately: True if done, False if still speaking
+                done = self._sapi_speaker.WaitUntilDone(0)
+                if done:
+                    self._speaking = False
+                    return False
+            except Exception:
+                self._speaking = False
+                return False
+        return self._speaking
+
+    def stop(self):
+        """Interrupt speech immediately."""
+        self._speaking = False
+        if self._sapi_speaker is not None:
+            try:
+                # SVSFPurgeBeforeSpeak = 2, clears the queue and stops
+                self._sapi_speaker.Speak("", 2)
+                logger.info("Speech interrupted.")
+            except Exception:
+                pass
 
     def _play_raw_audio(self, raw_audio: bytes):
         """Play raw PCM audio data using PyAudio (for Piper output)."""
