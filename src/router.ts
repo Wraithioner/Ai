@@ -8,6 +8,7 @@ import * as notes from "./skills/notes.js";
 import * as scheduler from "./skills/scheduler.js";
 import * as comms from "./skills/comms.js";
 import { runPython } from "./utils/python.js";
+import { persona } from "./personality.js";
 
 const HELP = `**Your Personal Agent** — here's everything I can do:
 
@@ -135,7 +136,7 @@ export async function route(text: string): Promise<string> {
     case "/downloads":
       return net.listDownloads();
     case "/ping":
-      if (!args) return "Pong! I'm alive.";
+      if (!args) return persona.responses.ping;
       return net.ping(args.trim());
     case "/dns":
       return args ? net.dnsLookup(args.trim()) : "Usage: `/dns <domain>`";
@@ -221,6 +222,6 @@ export async function route(text: string): Promise<string> {
       return args ? runPython("scrape.py", [args.trim()]) : "Usage: `/scrape <url>`";
 
     default:
-      return `Unknown command: \`${cmd}\`\nType /help for available commands.`;
+      return persona.responses.unknownCommand(cmd);
   }
 }

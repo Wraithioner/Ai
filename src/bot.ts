@@ -3,6 +3,7 @@
 import { Bot } from "grammy";
 import { config } from "./utils/config.js";
 import { route, HELP } from "./router.js";
+import { persona } from "./personality.js";
 import * as scheduler from "./skills/scheduler.js";
 
 const MAX_MSG = 4096;
@@ -18,22 +19,22 @@ export function createBot(): Bot {
   bot.use(async (ctx, next) => {
     const userId = ctx.from?.id ?? 0;
     if (config.ownerId !== 0 && userId !== config.ownerId) {
-      await ctx.reply(`Unauthorized. Your ID: \`${userId}\`\nSet OWNER_ID in Railway.`, {
-        parse_mode: "Markdown",
-      });
+      await ctx.reply(persona.responses.unauthorized, { parse_mode: "Markdown" });
       return;
     }
     await next();
   });
 
-  // --- /start and /help ---
+  // --- /start ---
   bot.command("start", async (ctx) => {
-    const name = ctx.from?.first_name ?? "there";
-    await sendSafe(ctx, `Hey **${name}**! I'm your personal agent.\n\n${HELP}`);
+    const name = ctx.from?.first_name ?? "boss";
+    const welcome = persona.welcome(name);
+    await sendSafe(ctx, `${welcome}\n\n${HELP}`);
   });
 
+  // --- /help ---
   bot.command("help", async (ctx) => {
-    await sendSafe(ctx, HELP);
+    await sendSafe(ctx, `${persona.helpHeader()}\n${HELP}`);
   });
 
   // --- /id ---
@@ -45,7 +46,7 @@ export function createBot(): Bot {
     );
   });
 
-  // --- All other commands ---
+  // --- All other messages ---
   bot.on("message:text", async (ctx) => {
     const text = ctx.message.text;
     console.log(`[${ctx.from?.id} @${ctx.from?.username}] ${text}`);
@@ -55,7 +56,6 @@ export function createBot(): Bot {
     if (text.startsWith("/")) {
       let response = await route(text);
 
-      // Special case for /id (needs ctx)
       if (response === "__ID__") {
         const u = ctx.from;
         response = `Your Telegram ID: \`${u?.id}\`\nName: ${u?.first_name ?? ""} ${u?.last_name ?? ""}\nUsername: @${u?.username ?? "none"}`;
@@ -63,11 +63,8 @@ export function createBot(): Bot {
 
       await sendSafe(ctx, response);
     } else {
-      // Free-form text — placeholder for AI
-      await sendSafe(
-        ctx,
-        `You said: "${text}"\n\nI can echo for now. Once an AI API is connected, I'll chat properly.\n\nType /help for commands.`
-      );
+      // Free-form text — personality response
+      await sendSafe(ctx, persona.responses.echo(text));
     }
   });
 
@@ -98,13 +95,13 @@ export async function setupBot(bot: Bot) {
     { command: "api", description: "HTTP API call" },
   ];
   await bot.api.setMyCommands(commands);
-  console.log("Bot commands menu set.");
+  console.log(`${persona.name} commands menu set.`);
 
-  // Start reminder scheduler
+  // Start reminder scheduler with personality
   scheduler.registerCallback(async (message: string) => {
     if (config.ownerId === 0) return;
     try {
-      await bot.api.sendMessage(config.ownerId, `**⏰ Reminder**\n\n${message}`, {
+      await bot.api.sendMessage(config.ownerId, persona.responses.reminder(message), {
         parse_mode: "Markdown",
       });
       console.log(`Reminder sent: ${message}`);
