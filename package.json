@@ -10,13 +10,15 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
+    "dotenv": "^16.4.0",
     "grammy": "^1.31.0",
-    "dotenv": "^16.4.0"
+    "nodemailer": "^8.0.1"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0",
+    "@types/nodemailer": "^7.0.9",
     "tsx": "^4.19.0",
-    "@types/node": "^22.0.0"
+    "typescript": "^5.6.0"
   },
   "engines": {
     "node": ">=20"

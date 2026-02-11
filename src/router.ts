@@ -6,6 +6,7 @@ import * as net from "./skills/net.js";
 import * as git from "./skills/git.js";
 import * as notes from "./skills/notes.js";
 import * as scheduler from "./skills/scheduler.js";
+import * as comms from "./skills/comms.js";
 import { runPython } from "./utils/python.js";
 
 const HELP = `**Your Personal Agent** — here's everything I can do:
@@ -53,6 +54,13 @@ const HELP = `**Your Personal Agent** — here's everything I can do:
 /remind \`<min>\` \`<msg>\` — Set reminder
 /reminders — List pending
 /cancel \`<id>\` — Cancel reminder
+
+**Communication**
+/email \`<to>\` \`<subject>\` \`<body>\` — Send email
+/webhook \`<url>\` \`<msg>\` — Send webhook
+/discord \`<webhook_url>\` \`<msg>\` — Send to Discord
+/slack \`<webhook_url>\` \`<msg>\` — Send to Slack
+/api \`<METHOD>\` \`<url>\` \`[body]\` — HTTP API call
 
 **Python**
 /py \`<code>\` — Run Python code
@@ -174,6 +182,37 @@ export async function route(text: string): Promise<string> {
       return scheduler.listReminders();
     case "/cancel":
       return args ? scheduler.cancelReminder(args.trim()) : "Usage: `/cancel <id>`";
+
+    // --- Communication ---
+    case "/email": {
+      const p = args.split(/\s+/, 3);
+      if (p.length < 3) return "Usage: `/email <to> <subject> <body>`\nSubject with spaces: use quotes";
+      const to = p[0];
+      const rest = args.slice(to.length).trim();
+      const subjEnd = rest.indexOf(" ");
+      if (subjEnd === -1) return "Usage: `/email <to> <subject> <body>`";
+      return comms.sendEmail(to, rest.slice(0, subjEnd), rest.slice(subjEnd + 1));
+    }
+    case "/webhook": {
+      const idx = args.indexOf(" ");
+      if (idx === -1) return "Usage: `/webhook <url> <message>`";
+      return comms.sendWebhook(args.slice(0, idx), args.slice(idx + 1));
+    }
+    case "/discord": {
+      const idx = args.indexOf(" ");
+      if (idx === -1) return "Usage: `/discord <webhook_url> <message>`";
+      return comms.sendDiscord(args.slice(0, idx), args.slice(idx + 1));
+    }
+    case "/slack": {
+      const idx = args.indexOf(" ");
+      if (idx === -1) return "Usage: `/slack <webhook_url> <message>`";
+      return comms.sendSlack(args.slice(0, idx), args.slice(idx + 1));
+    }
+    case "/api": {
+      const p = args.split(/\s+/, 3);
+      if (p.length < 2) return "Usage: `/api <GET|POST|PUT|DELETE> <url> [json_body]`";
+      return comms.apiCall(p[0], p[1], p[2]);
+    }
 
     // --- Python ---
     case "/py":

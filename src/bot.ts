@@ -91,6 +91,11 @@ export async function setupBot(bot: Bot) {
     { command: "uptime", description: "Bot uptime" },
     { command: "py", description: "Run Python code" },
     { command: "git", description: "Git operations" },
+    { command: "email", description: "Send an email" },
+    { command: "webhook", description: "Send a webhook" },
+    { command: "discord", description: "Send to Discord" },
+    { command: "slack", description: "Send to Slack" },
+    { command: "api", description: "HTTP API call" },
   ];
   await bot.api.setMyCommands(commands);
   console.log("Bot commands menu set.");
