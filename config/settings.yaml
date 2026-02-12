@@ -1,5 +1,5 @@
 # ============================================
-# Telegram AI Bot - Configuration
+# AI Telegram Bot - Configuration
 # ============================================
 # All values can be overridden by environment
 # variables on Railway (Settings > Variables).
@@ -9,8 +9,23 @@
 telegram:
   # Bot token from @BotFather (set via TELEGRAM_BOT_TOKEN env var on Railway)
   bot_token: ""
+  # Telegram user ID of the bot owner — gets admin commands
+  # (set via OWNER_ID env var on Railway)
+  owner_id: 0
   # Max concurrent users kept in memory (oldest evicted when exceeded)
   max_users: 100
+
+# --- Arena Platform ---
+arena:
+  # All Arena values are set via env vars on Railway:
+  #   ARENA_API_KEY, ARENA_AGENT_ID, ARENA_HANDLE,
+  #   ARENA_VERIFICATION_CODE, ARENA_WALLET, ARENA_WALLET_PRIVATE_KEY
+  api_key: ""
+  agent_id: ""
+  handle: ""
+  verification_code: ""
+  wallet: ""
+  wallet_private_key: ""
 
 # --- LLM Settings ---
 llm:
