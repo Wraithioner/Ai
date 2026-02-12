@@ -588,11 +588,11 @@ class TelegramBot:
             clean_topic = topic  # Fall back to full text
 
         prompt = (
-            f"Write a short post for Arena (social media) about: {clean_topic}\n\n"
-            "Rules: No hashtags. No bold. No emojis. No markdown. "
-            "Keep it under 280 characters. Just clean, natural text.\n"
-            "Ethical rules: Do not write anything promoting alcohol, gambling, "
-            "explicit content, fraud, or anything haram. Keep it halal and beneficial."
+            f"Write a short Arena post about: {clean_topic}\n\n"
+            "Sound like a real person, not a chatbot. Under 280 characters. "
+            "No hashtags, no bold, no emojis, no markdown — just natural text "
+            "like you'd actually say it. Nothing promoting alcohol, gambling, "
+            "explicit content, fraud, or anything haram."
         )
 
         try:
