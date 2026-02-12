@@ -1,7 +1,7 @@
 {
-  "name": "agent",
-  "version": "0.1.0",
-  "description": "Personal AI agent — Telegram bot with TypeScript gateway and Python skills",
+  "name": "atlas-agent",
+  "version": "0.2.0",
+  "description": "Atlas — Personal AI agent with Telegram gateway, Arena.social integration, and full system toolkit",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -10,15 +10,15 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "dotenv": "^16.4.0",
-    "grammy": "^1.31.0",
+    "dotenv": "^16.4.7",
+    "grammy": "^1.35.0",
     "nodemailer": "^8.0.1"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.13.0",
     "@types/nodemailer": "^7.0.9",
-    "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.0"
   },
   "engines": {
     "node": ">=20"

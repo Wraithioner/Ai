@@ -2,8 +2,12 @@
 
 import fs from "fs";
 import path from "path";
-
-const WORKSPACE = process.env.WORKSPACE ?? "/app";
+import {
+  WORKSPACE,
+  MAX_FILE_READ,
+  MAX_SEARCH_DEPTH,
+  MAX_SEARCH_RESULTS,
+} from "../utils/constants.js";
 
 function resolve(p: string): string {
   if (path.isAbsolute(p)) return p;
@@ -15,7 +19,7 @@ export function readFile(filePath: string): string {
     const target = resolve(filePath);
     if (!fs.existsSync(target)) return `File not found: ${filePath}`;
     const stat = fs.statSync(target);
-    if (stat.size > 50_000) return `File too large (${stat.size} bytes). Use head instead.`;
+    if (stat.size > MAX_FILE_READ) return `File too large (${stat.size} bytes). Use head instead.`;
     return fs.readFileSync(target, "utf-8");
   } catch (e: any) {
     return `Error: ${e.message}`;
@@ -93,14 +97,14 @@ export function searchFiles(dir: string, pattern: string): string {
     const results: string[] = [];
     walk(target, pattern, results, 0);
     if (results.length === 0) return `No files matching "${pattern}"`;
-    return results.slice(0, 50).join("\n");
+    return results.slice(0, MAX_SEARCH_RESULTS).join("\n");
   } catch (e: any) {
     return `Error: ${e.message}`;
   }
 }
 
 function walk(dir: string, pattern: string, results: string[], depth: number) {
-  if (depth > 5 || results.length >= 50) return;
+  if (depth > MAX_SEARCH_DEPTH || results.length >= MAX_SEARCH_RESULTS) return;
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {

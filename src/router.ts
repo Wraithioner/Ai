@@ -16,9 +16,10 @@ import { evalJS } from "./skills/eval.js";
 import * as status from "./skills/status.js";
 import * as history from "./skills/history.js";
 import { safeEnvValue, listSafeEnvVars, codeBlock } from "./utils/sanitize.js";
+import { config } from "./utils/config.js";
 import * as arena from "./skills/arena.js";
 
-const HELP = `${persona.name} — your personal agent. Here's everything:
+const HELP = `${persona.name} v0.2 — your personal agent. Here's everything:
 
 SYSTEM
 /run <cmd> — Shell command
@@ -126,8 +127,8 @@ export { HELP };
 
 export async function route(text: string, user = "unknown"): Promise<string> {
   const parts = text.split(/\s+/);
-  let cmd = parts[0].toLowerCase().split("@")[0];
-  const args = text.slice(parts[0].length).trim();
+  let cmd = (parts[0] ?? "").toLowerCase().split("@")[0]!;
+  const args = text.slice((parts[0] ?? "").length).trim();
 
   // Check for alias
   const aliasCmd = alias.resolveAlias(cmd.slice(1));
@@ -171,7 +172,7 @@ export async function route(text: string, user = "unknown"): Promise<string> {
     case "/head": {
       const p = args.split(/\s+/);
       if (!p[0]) return "Usage: `/head <path> [lines]`";
-      return files.headFile(p[0], parseInt(p[1]) || 20);
+      return files.headFile(p[0], parseInt(p[1] ?? "") || 20);
     }
     case "/write": {
       const idx = args.indexOf(" ");
@@ -182,7 +183,7 @@ export async function route(text: string, user = "unknown"): Promise<string> {
       return args ? files.deleteFile(args.trim()) : "Usage: `/rm <path>`";
     case "/find": {
       const p = args.split(/\s+/, 2);
-      if (p.length < 2) return "Usage: `/find <dir> <pattern>`";
+      if (!p[0] || !p[1]) return "Usage: `/find <dir> <pattern>`";
       return files.searchFiles(p[0], p[1]);
     }
     case "/grep": {
@@ -240,8 +241,8 @@ export async function route(text: string, user = "unknown"): Promise<string> {
     // --- Reminders ---
     case "/remind": {
       const p = args.split(/\s+/, 2);
-      const mins = parseInt(p[0]);
-      const msg = args.slice(p[0]?.length ?? 0).trim();
+      const mins = parseInt(p[0] ?? "");
+      const msg = args.slice((p[0] ?? "").length).trim();
       if (isNaN(mins) || !msg) return "Usage: `/remind <minutes> <message>`";
       return scheduler.setReminder(mins, msg);
     }
@@ -253,10 +254,10 @@ export async function route(text: string, user = "unknown"): Promise<string> {
     // --- Cron ---
     case "/cron": {
       const p = args.split(/\s+/, 2);
-      const mins = parseInt(p[0]);
-      const cmd = p[1];
-      if (isNaN(mins) || !cmd) return "Usage: `/cron <interval_min> <command>`";
-      return cronSkill.addCron(mins, cmd);
+      const mins = parseInt(p[0] ?? "");
+      const cronCmd = p[1];
+      if (isNaN(mins) || !cronCmd) return "Usage: `/cron <interval_min> <command>`";
+      return cronSkill.addCron(mins, cronCmd);
     }
     case "/crons":
       return cronSkill.listCrons();
@@ -266,7 +267,7 @@ export async function route(text: string, user = "unknown"): Promise<string> {
     // --- Communication ---
     case "/email": {
       const p = args.split(/\s+/, 3);
-      if (p.length < 3) return "Usage: `/email <to> <subject> <body>`";
+      if (!p[0] || !p[1] || !p[2]) return "Usage: `/email <to> <subject> <body>`";
       const to = p[0];
       const rest = args.slice(to.length).trim();
       const subjEnd = rest.indexOf(" ");
@@ -290,7 +291,7 @@ export async function route(text: string, user = "unknown"): Promise<string> {
     }
     case "/api": {
       const p = args.split(/\s+/, 3);
-      if (p.length < 2) return "Usage: `/api <GET|POST|PUT|DELETE> <url> [body]`";
+      if (!p[0] || !p[1]) return "Usage: `/api <GET|POST|PUT|DELETE> <url> [body]`";
       return comms.apiCall(p[0], p[1], p[2]);
     }
 
@@ -305,7 +306,7 @@ export async function route(text: string, user = "unknown"): Promise<string> {
     // --- Aliases ---
     case "/alias": {
       const p = args.split(/\s+/, 2);
-      if (p.length < 2) return "Usage: `/alias <name> <command>`";
+      if (!p[0] || !p[1]) return "Usage: `/alias <name> <command>`";
       return alias.setAlias(p[0], p[1]);
     }
     case "/aliases":
@@ -319,7 +320,6 @@ export async function route(text: string, user = "unknown"): Promise<string> {
       const subcmd = sub[0]?.toLowerCase();
       const subargs = args.slice((sub[0]?.length ?? 0)).trim();
       switch (subcmd) {
-        // Posts
         case "post":
           return subargs ? arena.createPost(subargs) : "Usage: /arena post <text>";
         case "reply": {
@@ -338,12 +338,10 @@ export async function route(text: string, user = "unknown"): Promise<string> {
           return subargs ? arena.unlikePost(subargs) : "Usage: /arena unlike <postId>";
         case "repost":
           return subargs ? arena.repost(subargs) : "Usage: /arena repost <postId>";
-
-        // Users
         case "search":
           return subargs ? arena.searchUser(subargs) : "Usage: /arena search <query>";
         case "user":
-          return arena.getUserByHandle(subargs || process.env.ARENA_HANDLE || "");
+          return arena.getUserByHandle(subargs || config.arenaHandle);
         case "trending":
           return arena.trending(parseInt(subargs) || 1);
         case "follow":
@@ -351,9 +349,7 @@ export async function route(text: string, user = "unknown"): Promise<string> {
         case "unfollow":
           return subargs ? arena.unfollow(subargs) : "Usage: /arena unfollow <handle>";
         case "followers":
-          return arena.getFollowers(subargs || process.env.ARENA_HANDLE || "");
-
-        // Chat
+          return arena.getFollowers(subargs || config.arenaHandle);
         case "dm": {
           const sp = subargs.split(/\s+/, 2);
           if (!sp[0] || !sp[1]) return "Usage: /arena dm <conversationId> <message>";
@@ -366,8 +362,6 @@ export async function route(text: string, user = "unknown"): Promise<string> {
           if (!sp[0] || !sp[1]) return "Usage: /arena react <messageId> <emoji>";
           return arena.reactToMessage(sp[0], sp[1]);
         }
-
-        // Live
         case "stage":
           return subargs ? arena.createStage(subargs) : "Usage: /arena stage <title>";
         case "live":
@@ -376,36 +370,26 @@ export async function route(text: string, user = "unknown"): Promise<string> {
           return arena.getStages();
         case "lives":
           return arena.getLivestreams();
-
-        // Shares
         case "shares":
-          return arena.shareStats(subargs || process.env.ARENA_HANDLE || undefined);
+          return arena.shareStats(subargs || config.arenaHandle || undefined);
         case "holdings":
           return arena.holdings();
         case "earnings":
           return arena.earnings();
-
-        // Communities
         case "communities":
           return arena.topCommunities();
         case "csearch":
           return subargs ? arena.searchCommunity(subargs) : "Usage: /arena csearch <query>";
         case "join":
           return subargs ? arena.joinCommunity(subargs) : "Usage: /arena join <communityId>";
-
-        // Notifications
         case "notifs":
           return arena.getNotifications(subargs || undefined);
         case "unseen":
           return arena.unseenNotifications();
         case "seen":
           return arena.markAllSeen();
-
-        // Config
         case "config":
           return arena.arenaConfig();
-
-        // Profile
         case "profile":
           return arena.getProfile();
         case "update": {
@@ -419,12 +403,11 @@ export async function route(text: string, user = "unknown"): Promise<string> {
         }
         case "register": {
           const sp = subargs.split(/\s+/, 3);
-          if (sp.length < 3) return "Usage: /arena register <name> <handle> <bio>";
+          if (!sp[0] || !sp[1] || !sp[2]) return "Usage: /arena register <name> <handle> <bio>";
           return arena.registerAgent(sp[0], sp[1], subargs.slice(sp[0].length + sp[1].length + 2).trim());
         }
-
         default:
-          return "Arena commands: post, reply, quote, like, unlike, repost, search, user, trending, follow, unfollow, followers, dm, convos, react, stage, live, stages, lives, shares, holdings, earnings, communities, csearch, join, notifs, unseen, seen, profile, update, register";
+          return "Arena commands: post, reply, quote, like, unlike, repost, search, user, trending, follow, unfollow, followers, dm, convos, react, stage, live, stages, lives, shares, holdings, earnings, communities, csearch, join, notifs, unseen, seen, profile, update, register, config";
       }
     }
 

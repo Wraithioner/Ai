@@ -2,8 +2,8 @@
 
 import fs from "fs";
 import path from "path";
+import { DATA_DIR } from "../utils/constants.js";
 
-const DATA_DIR = process.env.DATA_DIR ?? "/app/data";
 const ALIAS_FILE = path.join(DATA_DIR, "aliases.json");
 
 function load(): Record<string, string> {

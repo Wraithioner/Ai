@@ -2,8 +2,13 @@
 
 import fs from "fs";
 import path from "path";
+import {
+  DATA_DIR,
+  MIN_REMINDER_MIN,
+  MAX_REMINDER_MIN,
+  SCHEDULER_INTERVAL,
+} from "../utils/constants.js";
 
-const DATA_DIR = process.env.DATA_DIR ?? "/app/data";
 const REMINDERS_FILE = path.join(DATA_DIR, "reminders.json");
 
 interface Reminder {
@@ -34,7 +39,9 @@ function save(reminders: Reminder[]) {
 }
 
 export function setReminder(minutes: number, message: string): string {
-  if (minutes < 1 || minutes > 10080) return "Must be between 1 min and 7 days.";
+  if (minutes < MIN_REMINDER_MIN || minutes > MAX_REMINDER_MIN) {
+    return `Must be between ${MIN_REMINDER_MIN} min and 7 days.`;
+  }
 
   const reminders = load();
   const id = (reminders[reminders.length - 1]?.id ?? 0) + 1;
@@ -102,7 +109,7 @@ export function startScheduler() {
       }
     }
     if (changed) save(reminders);
-  }, 15_000);
+  }, SCHEDULER_INTERVAL);
 }
 
 export function stopScheduler() {

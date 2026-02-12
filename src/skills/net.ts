@@ -6,15 +6,22 @@ import path from "path";
 import https from "https";
 import http from "http";
 import { shellEscape } from "../utils/sanitize.js";
-
-const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR ?? "/app/data/downloads";
+import {
+  DOWNLOAD_DIR,
+  TIMEOUT_FETCH,
+  TIMEOUT_DOWNLOAD,
+  TIMEOUT_DNS,
+  MAX_FETCH_BODY,
+  MAX_RESPONSE,
+  USER_AGENT,
+} from "../utils/constants.js";
 
 export async function fetchUrl(url: string): Promise<string> {
   if (!url.startsWith("http")) url = "https://" + url;
 
   return new Promise((resolve) => {
     const mod = url.startsWith("https") ? https : http;
-    const req = mod.get(url, { timeout: 10_000, headers: { "User-Agent": "Agent/0.1" } }, (res) => {
+    const req = mod.get(url, { timeout: TIMEOUT_FETCH, headers: { "User-Agent": USER_AGENT } }, (res) => {
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         resolve(`Redirect → ${res.headers.location}`);
         return;
@@ -24,14 +31,14 @@ export async function fetchUrl(url: string): Promise<string> {
       res.setEncoding("utf-8");
       res.on("data", (chunk) => {
         data += chunk;
-        if (data.length > 10_000) res.destroy();
+        if (data.length > MAX_FETCH_BODY) res.destroy();
       });
       res.on("end", () => {
         const ct = res.headers["content-type"] ?? "";
         if (ct.includes("text/html")) {
-          resolve(stripHtml(data).slice(0, 4000));
+          resolve(stripHtml(data).slice(0, MAX_RESPONSE));
         } else {
-          resolve(data.slice(0, 4000));
+          resolve(data.slice(0, MAX_RESPONSE));
         }
       });
     });
@@ -55,7 +62,7 @@ export async function downloadFile(url: string, filename?: string): Promise<stri
 
   return new Promise((resolve) => {
     const mod = url.startsWith("https") ? https : http;
-    const req = mod.get(url, { timeout: 30_000, headers: { "User-Agent": "Agent/0.1" } }, (res) => {
+    const req = mod.get(url, { timeout: TIMEOUT_DOWNLOAD, headers: { "User-Agent": USER_AGENT } }, (res) => {
       if (res.statusCode !== 200) {
         resolve(`HTTP ${res.statusCode}`);
         return;
@@ -70,6 +77,10 @@ export async function downloadFile(url: string, filename?: string): Promise<stri
       });
     });
     req.on("error", (e) => resolve(`Error: ${e.message}`));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve("Download timed out.");
+    });
   });
 }
 
@@ -91,7 +102,7 @@ export function listDownloads(): string {
 
 export function ping(host: string): Promise<string> {
   return new Promise((resolve) => {
-    exec(`ping -c 4 ${shellEscape(host)}`, { timeout: 10_000 }, (error, stdout) => {
+    exec(`ping -c 4 ${shellEscape(host)}`, { timeout: TIMEOUT_FETCH }, (error, stdout) => {
       if (error) resolve(`Ping failed: ${error.message}`);
       else resolve(stdout.trim());
     });
@@ -100,7 +111,7 @@ export function ping(host: string): Promise<string> {
 
 export function dnsLookup(domain: string): Promise<string> {
   return new Promise((resolve) => {
-    exec(`dig +short ${shellEscape(domain)}`, { timeout: 5_000 }, (error, stdout) => {
+    exec(`dig +short ${shellEscape(domain)}`, { timeout: TIMEOUT_DNS }, (error, stdout) => {
       if (error) resolve(`DNS lookup failed: ${error.message}`);
       else resolve(stdout.trim() || "No records found.");
     });
@@ -109,7 +120,7 @@ export function dnsLookup(domain: string): Promise<string> {
 
 export function curl(url: string): Promise<string> {
   return new Promise((resolve) => {
-    exec(`curl -sI ${shellEscape(url)} | head -20`, { timeout: 10_000 }, (error, stdout) => {
+    exec(`curl -sI ${shellEscape(url)} | head -20`, { timeout: TIMEOUT_FETCH }, (error, stdout) => {
       if (error) resolve(`Curl failed: ${error.message}`);
       else resolve(stdout.trim());
     });

@@ -2,8 +2,8 @@
 
 import fs from "fs";
 import path from "path";
+import { DATA_DIR } from "../utils/constants.js";
 
-const DATA_DIR = process.env.DATA_DIR ?? "/app/data";
 const NOTES_FILE = path.join(DATA_DIR, "notes.json");
 
 interface Note {

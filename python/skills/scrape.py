@@ -25,9 +25,13 @@ def main():
         url = "https://" + url
 
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Agent/0.1"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Atlas/0.2"})
         with urllib.request.urlopen(req, timeout=10) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
+            content_length = resp.headers.get("Content-Length")
+            if content_length and int(content_length) > 5_000_000:
+                print("Page too large (>5MB).")
+                return
+            html = resp.read(5_000_000).decode("utf-8", errors="replace")
 
         text = strip_html(html)
 

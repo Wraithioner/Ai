@@ -2,13 +2,12 @@
 
 import { exec } from "child_process";
 import { shellEscape } from "../utils/sanitize.js";
-
-const REPOS_DIR = process.env.REPOS_DIR ?? "/app/data/repos";
+import { REPOS_DIR, TIMEOUT_SHELL } from "../utils/constants.js";
 
 function git(args: string, cwd?: string): Promise<string> {
   const cmd = `git ${args}`;
   return new Promise((resolve) => {
-    exec(cmd, { timeout: 30_000, cwd: cwd ?? process.cwd() }, (error, stdout, stderr) => {
+    exec(cmd, { timeout: TIMEOUT_SHELL, cwd: cwd ?? process.cwd() }, (error, stdout, stderr) => {
       const out = stdout.trim();
       const err = stderr.trim();
       if (error && !out && !err) {

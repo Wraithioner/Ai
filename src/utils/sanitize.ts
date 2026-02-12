@@ -4,6 +4,7 @@
 const SENSITIVE_PATTERNS = [
   /token/i, /secret/i, /password/i, /pass/i, /key/i,
   /auth/i, /credential/i, /smtp/i, /api/i, /private/i,
+  /wallet/i,
 ];
 
 /** Check if an env var name is sensitive. */

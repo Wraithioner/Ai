@@ -2,8 +2,12 @@
 
 import fs from "fs";
 import path from "path";
-
-const WORKSPACE = process.env.WORKSPACE ?? "/app";
+import {
+  WORKSPACE,
+  MAX_SEARCH_DEPTH,
+  MAX_GREP_RESULTS,
+  MAX_GREP_FILE_SIZE,
+} from "../utils/constants.js";
 
 interface GrepResult {
   file: string;
@@ -11,7 +15,7 @@ interface GrepResult {
   text: string;
 }
 
-export function grep(pattern: string, dir = ".", maxResults = 30): string {
+export function grep(pattern: string, dir = ".", maxResults = MAX_GREP_RESULTS): string {
   const target = path.isAbsolute(dir) ? dir : path.join(WORKSPACE, dir);
 
   if (!fs.existsSync(target)) return `Directory not found: ${dir}`;
@@ -34,7 +38,7 @@ export function grep(pattern: string, dir = ".", maxResults = 30): string {
 }
 
 function searchDir(dir: string, pattern: RegExp, results: GrepResult[], max: number, depth: number) {
-  if (depth > 5 || results.length >= max) return;
+  if (depth > MAX_SEARCH_DEPTH || results.length >= max) return;
 
   let entries: fs.Dirent[];
   try {
@@ -52,13 +56,13 @@ function searchDir(dir: string, pattern: RegExp, results: GrepResult[], max: num
     } else if (entry.isFile() && isTextFile(entry.name)) {
       try {
         const stat = fs.statSync(full);
-        if (stat.size > 500_000) continue; // skip large files
+        if (stat.size > MAX_GREP_FILE_SIZE) continue;
 
         const content = fs.readFileSync(full, "utf-8");
         const lines = content.split("\n");
         for (let i = 0; i < lines.length && results.length < max; i++) {
-          if (pattern.test(lines[i])) {
-            results.push({ file: full, line: i + 1, text: lines[i] });
+          if (pattern.test(lines[i]!)) {
+            results.push({ file: full, line: i + 1, text: lines[i]! });
           }
         }
       } catch { /* skip unreadable files */ }
@@ -71,7 +75,8 @@ function isTextFile(name: string): boolean {
   const textExts = new Set([
     ".ts", ".js", ".py", ".json", ".yaml", ".yml", ".toml",
     ".md", ".txt", ".sh", ".bash", ".css", ".html", ".xml",
-    ".env", ".cfg", ".ini", ".conf", ".log", ".csv",
+    ".env", ".cfg", ".ini", ".conf", ".log", ".csv", ".sql",
+    ".jsx", ".tsx", ".mjs", ".cjs", ".rs", ".go", ".rb",
   ]);
-  return textExts.has(ext) || !ext; // no extension = probably text
+  return textExts.has(ext) || !ext;
 }

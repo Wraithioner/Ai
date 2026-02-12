@@ -3,32 +3,26 @@
 import nodemailer from "nodemailer";
 import https from "https";
 import http from "http";
+import { config } from "../utils/config.js";
+import { TIMEOUT_API, MAX_API_RESPONSE, MAX_RESPONSE, USER_AGENT } from "../utils/constants.js";
 
 // ─── Email ───────────────────────────────────────────────
 
-const smtpConfig = {
-  host: process.env.SMTP_HOST ?? "",
-  port: Number(process.env.SMTP_PORT ?? "587"),
-  user: process.env.SMTP_USER ?? "",
-  pass: process.env.SMTP_PASS ?? "",
-  from: process.env.SMTP_FROM ?? "",
-};
-
 export async function sendEmail(to: string, subject: string, body: string): Promise<string> {
-  if (!smtpConfig.host || !smtpConfig.user) {
+  if (!config.smtpHost || !config.smtpUser) {
     return "Email not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM in Railway.";
   }
 
   try {
     const transport = nodemailer.createTransport({
-      host: smtpConfig.host,
-      port: smtpConfig.port,
-      secure: smtpConfig.port === 465,
-      auth: { user: smtpConfig.user, pass: smtpConfig.pass },
+      host: config.smtpHost,
+      port: config.smtpPort,
+      secure: config.smtpPort === 465,
+      auth: { user: config.smtpUser, pass: config.smtpPass },
     });
 
     const info = await transport.sendMail({
-      from: smtpConfig.from || smtpConfig.user,
+      from: config.smtpFrom || config.smtpUser,
       to,
       subject,
       text: body,
@@ -83,7 +77,7 @@ export async function apiCall(
   if (!url.startsWith("http")) url = "https://" + url;
 
   const defaultHeaders: Record<string, string> = {
-    "User-Agent": "Agent/0.1",
+    "User-Agent": USER_AGENT,
     "Content-Type": "application/json",
     ...headers,
   };
@@ -97,7 +91,7 @@ export async function apiCall(
       path: u.pathname + u.search,
       method: method.toUpperCase(),
       headers: defaultHeaders,
-      timeout: 15_000,
+      timeout: TIMEOUT_API,
     };
 
     const req = mod.request(opts, (res) => {
@@ -105,10 +99,10 @@ export async function apiCall(
       res.setEncoding("utf-8");
       res.on("data", (chunk) => {
         data += chunk;
-        if (data.length > 5000) res.destroy();
+        if (data.length > MAX_API_RESPONSE) res.destroy();
       });
       res.on("end", () => {
-        resolve(`HTTP ${res.statusCode}\n${data.slice(0, 4000)}`);
+        resolve(`HTTP ${res.statusCode}\n${data.slice(0, MAX_RESPONSE)}`);
       });
     });
 

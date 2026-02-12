@@ -1,12 +1,13 @@
 /** Command history — tracks recent commands. */
 
+import { MAX_HISTORY } from "../utils/constants.js";
+
 interface HistoryEntry {
   command: string;
   timestamp: number;
   user: string;
 }
 
-const MAX_HISTORY = 50;
 const entries: HistoryEntry[] = [];
 
 export function record(command: string, user: string) {

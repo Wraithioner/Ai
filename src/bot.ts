@@ -9,9 +9,7 @@ import { persona } from "./personality.js";
 import * as scheduler from "./skills/scheduler.js";
 import * as cronSkill from "./skills/cron.js";
 import { checkRateLimit } from "./utils/ratelimit.js";
-
-const MAX_MSG = 4096;
-const UPLOAD_DIR = process.env.UPLOAD_DIR ?? "/app/data/uploads";
+import { MAX_TELEGRAM_MSG, MAX_FILE_UPLOAD, UPLOAD_DIR } from "./utils/constants.js";
 
 export function createBot(): Bot {
   if (!config.telegramToken) {
@@ -77,17 +75,14 @@ export function createBot(): Bot {
     await handleMediaUpload(ctx, "document");
   });
 
-  // --- Photo uploads ---
   bot.on("message:photo", async (ctx) => {
     await handleMediaUpload(ctx, "photo");
   });
 
-  // --- Voice messages ---
   bot.on("message:voice", async (ctx) => {
     await handleMediaUpload(ctx, "voice");
   });
 
-  // --- Video messages ---
   bot.on("message:video", async (ctx) => {
     await handleMediaUpload(ctx, "video");
   });
@@ -105,7 +100,7 @@ export function createBot(): Bot {
         return;
       }
       const stat = fs.statSync(filePath);
-      if (stat.size > 50 * 1024 * 1024) {
+      if (stat.size > MAX_FILE_UPLOAD) {
         await ctx.reply("File too large (max 50MB for Telegram).");
         return;
       }
@@ -159,6 +154,7 @@ export async function setupBot(bot: Bot) {
     { command: "py", description: "Run Python code" },
     { command: "git", description: "Git operations" },
     { command: "email", description: "Send an email" },
+    { command: "arena", description: "Arena.social commands" },
     { command: "sendfile", description: "Send a file from server" },
     { command: "ping", description: "Ping (or check bot)" },
     { command: "id", description: "Your Telegram ID" },
@@ -245,8 +241,8 @@ async function handleMediaUpload(ctx: any, type: string) {
 /** Send a message, splitting if too long. Falls back to plain text on parse error. */
 async function sendSafe(ctx: any, text: string, mode: string = "Markdown") {
   const chunks: string[] = [];
-  for (let i = 0; i < text.length; i += MAX_MSG) {
-    chunks.push(text.slice(i, i + MAX_MSG));
+  for (let i = 0; i < text.length; i += MAX_TELEGRAM_MSG) {
+    chunks.push(text.slice(i, i + MAX_TELEGRAM_MSG));
   }
 
   for (const chunk of chunks) {

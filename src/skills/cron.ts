@@ -2,8 +2,13 @@
 
 import fs from "fs";
 import path from "path";
+import {
+  DATA_DIR,
+  MIN_REMINDER_MIN,
+  MAX_REMINDER_MIN,
+  CRON_INTERVAL,
+} from "../utils/constants.js";
 
-const DATA_DIR = process.env.DATA_DIR ?? "/app/data";
 const CRON_FILE = path.join(DATA_DIR, "cron.json");
 
 interface CronJob {
@@ -34,7 +39,9 @@ function save(jobs: CronJob[]) {
 }
 
 export function addCron(intervalMin: number, command: string): string {
-  if (intervalMin < 1 || intervalMin > 10080) return "Interval must be 1min to 7 days.";
+  if (intervalMin < MIN_REMINDER_MIN || intervalMin > MAX_REMINDER_MIN) {
+    return `Interval must be ${MIN_REMINDER_MIN}min to 7 days.`;
+  }
 
   const jobs = load();
   const id = (jobs[jobs.length - 1]?.id ?? 0) + 1;
@@ -104,7 +111,7 @@ export function startCronScheduler() {
       }
     }
     if (changed) save(jobs);
-  }, 30_000);
+  }, CRON_INTERVAL);
 }
 
 export function stopCronScheduler() {

@@ -1,5 +1,6 @@
 /** Entry point — start the agent. */
 
+import "dotenv/config";
 import { createBot, setupBot } from "./bot.js";
 import { persona } from "./personality.js";
 import { stopScheduler } from "./skills/scheduler.js";

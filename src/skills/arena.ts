@@ -1,74 +1,64 @@
 /** Arena.social agent API — full integration. */
 
 import https from "https";
+import { config } from "../utils/config.js";
+import {
+  TIMEOUT_API,
+  MAX_ARENA_RESPONSE,
+  MAX_RESPONSE,
+  USER_AGENT,
+} from "../utils/constants.js";
 
 const BASE = "https://api.starsarena.com";
-
-function getKey(): string {
-  return process.env.ARENA_API_KEY ?? "";
-}
-
-function getAgentId(): string {
-  return process.env.ARENA_AGENT_ID ?? "";
-}
-
-function getHandle(): string {
-  return process.env.ARENA_HANDLE ?? "";
-}
-
-function getVerificationCode(): string {
-  return process.env.ARENA_VERIFICATION_CODE ?? "";
-}
-
-function getWallet(): string {
-  return process.env.ARENA_WALLET ?? "";
-}
-
-function getWalletPrivateKey(): string {
-  return process.env.ARENA_WALLET_PRIVATE_KEY ?? "";
-}
 
 function api(
   method: string,
   path: string,
   body?: Record<string, any>
 ): Promise<{ status: number; data: any }> {
-  const key = getKey();
-  if (!key) return Promise.resolve({ status: 0, data: "ARENA_API_KEY not set. Add it in Railway env vars." });
+  if (!config.arenaApiKey) {
+    return Promise.resolve({ status: 0, data: "ARENA_API_KEY not set. Add it in Railway env vars." });
+  }
 
   const url = new URL(path, BASE);
   const payload = body ? JSON.stringify(body) : undefined;
 
   return new Promise((resolve) => {
+    const headers: Record<string, string> = {
+      "X-API-Key": config.arenaApiKey,
+      "Content-Type": "application/json",
+      "User-Agent": USER_AGENT,
+    };
+
+    if (config.arenaWallet) {
+      headers["X-Wallet-Address"] = config.arenaWallet;
+    }
+
+    if (payload) {
+      headers["Content-Length"] = Buffer.byteLength(payload).toString();
+    }
+
     const opts = {
       hostname: url.hostname,
       port: 443,
       path: url.pathname + url.search,
       method: method.toUpperCase(),
-      headers: {
-        "X-API-Key": key,
-        "Content-Type": "application/json",
-        "User-Agent": "Atlas/0.1",
-      } as Record<string, string>,
-      timeout: 15_000,
+      headers,
+      timeout: TIMEOUT_API,
     };
-
-    if (payload) {
-      opts.headers["Content-Length"] = Buffer.byteLength(payload).toString();
-    }
 
     const req = https.request(opts, (res) => {
       let raw = "";
       res.setEncoding("utf-8");
       res.on("data", (chunk) => {
         raw += chunk;
-        if (raw.length > 10_000) res.destroy();
+        if (raw.length > MAX_ARENA_RESPONSE) res.destroy();
       });
       res.on("end", () => {
         try {
           resolve({ status: res.statusCode ?? 0, data: JSON.parse(raw) });
         } catch {
-          resolve({ status: res.statusCode ?? 0, data: raw.slice(0, 4000) });
+          resolve({ status: res.statusCode ?? 0, data: raw.slice(0, MAX_RESPONSE) });
         }
       });
     });
@@ -83,26 +73,20 @@ function api(
 
 function fmt(obj: any): string {
   if (typeof obj === "string") return obj;
-  return JSON.stringify(obj, null, 2).slice(0, 3800);
+  return JSON.stringify(obj, null, 2).slice(0, MAX_RESPONSE);
 }
 
 // ─── Config check ─────────────────────────────────────────
 
 export function arenaConfig(): string {
-  const key = getKey();
-  const id = getAgentId();
-  const handle = getHandle();
-  const code = getVerificationCode();
-  const wallet = getWallet();
-  const pk = getWalletPrivateKey();
   return [
     "Arena Configuration:",
-    `API Key: ${key ? "set" : "NOT SET"}`,
-    `Agent ID: ${id || "not set"}`,
-    `Handle: ${handle ? `@${handle}` : "not set"}`,
-    `Verification Code: ${code ? "set" : "not set"}`,
-    `Wallet: ${wallet || "not set"}`,
-    `Wallet Key: ${pk ? "set (hidden)" : "not set"}`,
+    `API Key: ${config.arenaApiKey ? "set" : "NOT SET"}`,
+    `Agent ID: ${config.arenaAgentId || "not set"}`,
+    `Handle: ${config.arenaHandle ? `@${config.arenaHandle}` : "not set"}`,
+    `Verification Code: ${config.arenaVerificationCode ? "set" : "not set"}`,
+    `Wallet: ${config.arenaWallet || "not set"}`,
+    `Wallet Key: ${config.arenaWalletPrivateKey ? "set (hidden)" : "not set"}`,
   ].join("\n");
 }
 
@@ -131,11 +115,10 @@ export async function getProfile(): Promise<string> {
   if (res.status === 0) return fmt(res.data);
   const u = res.data;
   if (u?.name) {
-    const agentId = getAgentId();
     return [
       `Name: ${u.name}`,
       `Handle: @${u.handle ?? "unknown"}`,
-      `ID: ${u.id ?? (agentId || "unknown")}`,
+      `ID: ${u.id ?? (config.arenaAgentId || "unknown")}`,
       `Bio: ${u.bio ?? "none"}`,
       `Followers: ${u.followerCount ?? 0}`,
       `Following: ${u.followingCount ?? 0}`,

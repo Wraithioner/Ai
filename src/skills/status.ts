@@ -3,10 +3,11 @@
 import os from "os";
 import fs from "fs";
 import { persona } from "../personality.js";
+import { DATA_DIR } from "../utils/constants.js";
 
 let commandCount = 0;
 let lastCommand = "";
-let startTime = Date.now();
+const startTime = Date.now();
 
 export function trackCommand(cmd: string) {
   commandCount++;
@@ -20,18 +21,23 @@ export function getStatus(): string {
   const freeMem = os.freemem();
   const cpuLoad = os.loadavg();
 
-  const dataDir = process.env.DATA_DIR ?? "/app/data";
   let notesCount = 0;
   let remindersCount = 0;
+  let cronCount = 0;
   try {
-    const notesFile = `${dataDir}/notes.json`;
+    const notesFile = `${DATA_DIR}/notes.json`;
     if (fs.existsSync(notesFile)) {
       notesCount = JSON.parse(fs.readFileSync(notesFile, "utf-8")).length;
     }
-    const remFile = `${dataDir}/reminders.json`;
+    const remFile = `${DATA_DIR}/reminders.json`;
     if (fs.existsSync(remFile)) {
       remindersCount = JSON.parse(fs.readFileSync(remFile, "utf-8"))
         .filter((r: any) => !r.fired).length;
+    }
+    const cronFile = `${DATA_DIR}/cron.json`;
+    if (fs.existsSync(cronFile)) {
+      cronCount = JSON.parse(fs.readFileSync(cronFile, "utf-8"))
+        .filter((j: any) => j.enabled).length;
     }
   } catch { /* ignore */ }
 
@@ -56,6 +62,7 @@ export function getStatus(): string {
     `*Data*`,
     `Notes: ${notesCount}`,
     `Pending reminders: ${remindersCount}`,
+    `Active cron jobs: ${cronCount}`,
     "",
     `Node ${process.version} | ${os.type()} ${os.arch()}`,
   ].join("\n");

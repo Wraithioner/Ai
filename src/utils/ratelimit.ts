@@ -1,14 +1,14 @@
 /** Rate limiting — prevent command spam. */
 
+import { config } from "./config.js";
+
 interface RateEntry {
   count: number;
   resetAt: number;
 }
 
 const limits = new Map<number, RateEntry>();
-
-const MAX_COMMANDS = Number(process.env.RATE_LIMIT ?? "30"); // per window
-const WINDOW_MS = 60_000; // 1 minute
+const WINDOW_MS = 60_000;
 
 export function checkRateLimit(userId: number): { allowed: boolean; remaining: number } {
   const now = Date.now();
@@ -21,12 +21,12 @@ export function checkRateLimit(userId: number): { allowed: boolean; remaining: n
 
   entry.count++;
 
-  if (entry.count > MAX_COMMANDS) {
+  if (entry.count > config.rateLimit) {
     const waitSec = Math.ceil((entry.resetAt - now) / 1000);
     return { allowed: false, remaining: waitSec };
   }
 
-  return { allowed: true, remaining: MAX_COMMANDS - entry.count };
+  return { allowed: true, remaining: config.rateLimit - entry.count };
 }
 
 // Cleanup old entries every 5 minutes

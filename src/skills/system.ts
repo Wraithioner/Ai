@@ -3,8 +3,9 @@
 import { exec } from "child_process";
 import os from "os";
 import { shellEscape } from "../utils/sanitize.js";
+import { TIMEOUT_SHELL } from "../utils/constants.js";
 
-export function runCommand(command: string, timeout = 30_000): Promise<string> {
+export function runCommand(command: string, timeout = TIMEOUT_SHELL): Promise<string> {
   return new Promise((resolve) => {
     exec(command, { timeout }, (error, stdout, stderr) => {
       if (error?.killed) {
@@ -52,16 +53,16 @@ export async function listProcesses(filter?: string): Promise<string> {
 
 export async function killProcess(pid: string): Promise<string> {
   const n = parseInt(pid, 10);
-  if (isNaN(n)) return "Invalid PID.";
+  if (isNaN(n) || n <= 0) return "Invalid PID.";
   try {
-    process.kill(n, "SIGKILL");
-    return `Killed process ${n}`;
+    process.kill(n, "SIGTERM");
+    return `Sent SIGTERM to process ${n}.`;
   } catch (e: any) {
     return `Failed: ${e.message}`;
   }
 }
 
-let startTime = Date.now();
+const startTime = Date.now();
 export function botUptime(): string {
   const elapsed = Math.floor((Date.now() - startTime) / 1000);
   const d = Math.floor(elapsed / 86400);
