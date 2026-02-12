@@ -82,7 +82,10 @@ def run_training(config_path: str | None = None):
     )
 
     config = load_config(config_path)
-    model_name = config["llm"]["model"]
+    model_name = config.get("llm", {}).get("model")
+    if not model_name:
+        print("Error: No model specified. Set MODEL_NAME env var or llm.model in settings.yaml.")
+        return
     output_dir = MODELS_DIR / "atlas-brain"
 
     print("\n" + "=" * 50)
@@ -195,3 +198,7 @@ def run_training(config_path: str | None = None):
     print(f"\nAtlas's brain saved to: {output_dir}")
     print("\nDone! Atlas will now use your fine-tuned brain.")
     print("Start Atlas with: python -m atlas.main")
+
+
+if __name__ == "__main__":
+    run_training()
