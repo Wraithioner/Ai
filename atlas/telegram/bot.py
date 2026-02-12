@@ -172,39 +172,122 @@ class TelegramBot:
     # INTENT DETECTION — route natural language to Arena actions
     # ================================================================
 
-    # Patterns that indicate "post to Arena"
-    _POST_PATTERNS = [
-        r"(?:create|make|write|draft|compose|do|send)\s+(?:a\s+)?(?:post|thread|tweet)",
-        r"post\s+(?:on|to|about|this)",
-        r"(?:put|share)\s+(?:this\s+)?(?:on|to)\s+arena",
-        r"arena\s+post",
-    ]
-
-    # Patterns that indicate "reply on Arena"
-    _REPLY_PATTERNS = [
-        r"(?:reply|respond|answer)\s+(?:to|on)\s+(?:arena|thread|post)",
+    # Each entry: (intent_name, list_of_regex_patterns)
+    _INTENT_PATTERNS = [
+        # --- Posts ---
+        ("post", [
+            r"(?:create|make|write|draft|compose|do|send)\s+(?:a\s+)?(?:post|thread|tweet)",
+            r"post\s+(?:on|to|about|this)",
+            r"(?:put|share)\s+(?:this\s+)?(?:on|to)\s+arena",
+            r"arena\s+post",
+        ]),
+        # --- Feeds ---
+        ("feed", [
+            r"(?:show|check|get|view|open|see|what'?s?\s+(?:on|in))\s+(?:my\s+)?feed",
+            r"my\s+feed",
+            r"(?:show|check)\s+(?:my\s+)?arena\s+feed",
+        ]),
+        ("trending", [
+            r"(?:show|check|get|view|what'?s?)\s+trending",
+            r"trending\s+(?:feed|posts?|on\s+arena)",
+        ]),
+        # --- Profile ---
+        ("me", [
+            r"(?:show|check|get|view|see)\s+my\s+(?:arena\s+)?profile",
+            r"my\s+(?:arena\s+)?profile",
+            r"who\s+am\s+i\s+on\s+arena",
+        ]),
+        # --- Social ---
+        ("followers", [
+            r"(?:show|check|get|view|see|list|who\s+are)\s+(?:my\s+)?followers",
+            r"my\s+followers",
+            r"who\s+follows\s+me",
+        ]),
+        ("following", [
+            r"(?:show|check|get|view|see|list)\s+(?:who\s+(?:i|am)\s+follow|(?:my\s+)?following)",
+            r"who\s+(?:do\s+)?i\s+follow",
+            r"my\s+following",
+        ]),
+        ("follow", [
+            r"follow\s+(?:user\s+)?(@?\w+)",
+            r"follow\s+(?:them|this\s+user|that\s+user)",
+        ]),
+        ("unfollow", [
+            r"unfollow\s+(?:user\s+)?(@?\w+)",
+            r"unfollow\s+(?:them|this\s+user|that\s+user)",
+        ]),
+        ("search_users", [
+            r"(?:search|find|look\s+(?:up|for))\s+(?:user|people|person|account)s?\s+(.+)",
+            r"(?:search|find)\s+(?:on\s+arena\s+)?(?:for\s+)?(@?\w+)",
+        ]),
+        # --- Notifications ---
+        ("notifications", [
+            r"(?:show|check|get|view|see|any)\s+(?:my\s+)?notif(?:ication)?s?",
+            r"my\s+notif(?:ication)?s?",
+            r"do\s+i\s+have\s+(?:any\s+)?notif(?:ication)?s?",
+            r"(?:what|any)\s+(?:new\s+)?notif(?:ication)?s?",
+        ]),
+        ("clear_notifications", [
+            r"(?:clear|mark|dismiss|read)\s+(?:all\s+)?notif(?:ication)?s?(?:\s+(?:as\s+)?(?:seen|read))?",
+        ]),
+        # --- Stats / Financial ---
+        ("shares", [
+            r"(?:show|check|get|view|see)\s+(?:my\s+)?(?:share|token)\s*(?:stats?|info)?",
+            r"my\s+(?:share|token)\s*stats?",
+            r"(?:how\s+are|what\s+are)\s+my\s+shares?\s+(?:doing|at|worth)",
+        ]),
+        ("holdings", [
+            r"(?:show|check|get|view|see)\s+(?:my\s+)?holdings?",
+            r"my\s+holdings?",
+            r"(?:what|which)\s+(?:shares?\s+)?(?:do\s+)?i\s+(?:hold|own)",
+            r"my\s+portfolio",
+        ]),
+        ("earnings", [
+            r"(?:show|check|get|view|see)\s+(?:my\s+)?earnings?",
+            r"my\s+earnings?",
+            r"how\s+much\s+(?:have\s+i|did\s+i)\s+(?:earn|made?)",
+        ]),
+        ("holders", [
+            r"(?:show|check|get|view|see|who)\s+(?:are\s+)?(?:my\s+)?(?:share\s*)?holders?",
+            r"who\s+(?:holds?|owns?|bought)\s+my\s+shares?",
+        ]),
+        # --- Chat ---
+        ("conversations", [
+            r"(?:show|check|get|view|see|list|open)\s+(?:my\s+)?(?:chat|conversation|message|dm)s?",
+            r"my\s+(?:chat|conversation|dm)s?",
+        ]),
+        # --- Communities ---
+        ("communities", [
+            r"(?:show|check|get|view|see|list|browse)\s+(?:top\s+)?communit(?:y|ies)",
+            r"(?:top|popular|trending)\s+communit(?:y|ies)",
+        ]),
+        # --- Like ---
+        ("like", [
+            r"like\s+(?:that|this|the)\s+(?:post|thread)",
+            r"like\s+(?:post|thread)\s+(\S+)",
+        ]),
+        # --- Repost ---
+        ("repost", [
+            r"(?:repost|reshare|share)\s+(?:that|this|the)\s+(?:post|thread)",
+            r"(?:repost|reshare)\s+(?:post|thread)\s+(\S+)",
+        ]),
     ]
 
     def _detect_arena_intent(self, text: str) -> tuple[str | None, str]:
         """Detect if a message is requesting an Arena action.
 
         Returns:
-            (intent, topic) — intent is "post", "reply", or None.
-            topic is the subject/content hint extracted from the message.
+            (intent, extra) — intent name or None, and any extracted argument.
         """
-        lower = text.lower()
+        lower = text.lower().strip()
 
-        # Check for post intent
-        for pattern in self._POST_PATTERNS:
-            if re.search(pattern, lower):
-                # Extract the topic: everything after "about" or "on arena"
-                topic = text
-                about_match = re.search(r"(?:about|regarding|on)\s+(.+)", lower)
-                if about_match:
-                    topic = about_match.group(1).strip()
-                    # Remove trailing "on arena" if present
-                    topic = re.sub(r"\s+on\s+arena\s*$", "", topic, flags=re.IGNORECASE)
-                return "post", topic
+        for intent_name, patterns in self._INTENT_PATTERNS:
+            for pattern in patterns:
+                match = re.search(pattern, lower)
+                if match:
+                    # Try to extract a captured group as the argument
+                    extra = match.group(1) if match.lastindex else text
+                    return intent_name, extra
 
         return None, text
 
@@ -225,12 +308,12 @@ class TelegramBot:
         # Show typing while generating
         await update.message.chat.send_action("typing")
 
-        # Check if this is an Arena action request
-        intent, topic = self._detect_arena_intent(text)
-
-        if intent == "post" and self.arena and self.arena.configured:
-            await self._handle_arena_post_intent(update, text, topic)
-            return
+        # Try to detect an Arena intent
+        if self.arena and self.arena.configured:
+            intent, extra = self._detect_arena_intent(text)
+            handled = await self._dispatch_intent(update, intent, extra, text)
+            if handled:
+                return
 
         # Regular LLM conversation
         try:
@@ -244,11 +327,226 @@ class TelegramBot:
 
         await send_long(update, response)
 
+    async def _dispatch_intent(self, update: Update, intent: str | None, extra: str, original: str) -> bool:
+        """Dispatch a detected intent to the right Arena action. Returns True if handled."""
+        if intent is None:
+            return False
+
+        # --- Post: generate content via LLM then post ---
+        if intent == "post":
+            await self._handle_arena_post_intent(update, original, extra)
+            return True
+
+        # --- Feeds ---
+        if intent == "feed":
+            feed = await asyncio.to_thread(self.arena.get_my_feed)
+            await self._display_feed(update, feed, "Your Feed")
+            return True
+
+        if intent == "trending":
+            feed = await asyncio.to_thread(self.arena.get_trending_feed)
+            await self._display_feed(update, feed, "Trending")
+            return True
+
+        # --- Profile ---
+        if intent == "me":
+            profile = await asyncio.to_thread(self.arena.get_me)
+            if not profile:
+                await update.message.reply_text("Could not load your Arena profile.")
+                return True
+            lines = ["<b>Your Arena Profile</b>\n"]
+            if isinstance(profile, dict):
+                for key in ["handle", "username", "bio", "followersCount", "followingCount", "sharesCount"]:
+                    if key in profile:
+                        lines.append(f"{key}: <code>{escape(str(profile[key]))}</code>")
+            else:
+                lines.append(escape(str(profile)))
+            await send_long(update, "\n".join(lines), parse_mode=ParseMode.HTML)
+            return True
+
+        # --- Social ---
+        if intent == "followers":
+            data = await asyncio.to_thread(self.arena.get_followers)
+            await self._display_user_list(update, data, "Your Followers")
+            return True
+
+        if intent == "following":
+            data = await asyncio.to_thread(self.arena.get_following)
+            await self._display_user_list(update, data, "Following")
+            return True
+
+        if intent == "follow":
+            result = await asyncio.to_thread(self.arena.follow_user, extra)
+            await update.message.reply_text("Followed." if result else "Failed to follow.")
+            return True
+
+        if intent == "unfollow":
+            result = await asyncio.to_thread(self.arena.unfollow_user, extra)
+            await update.message.reply_text("Unfollowed." if result else "Failed to unfollow.")
+            return True
+
+        if intent == "search_users":
+            data = await asyncio.to_thread(self.arena.search_users, extra)
+            await self._display_user_list(update, data, f"Search: {escape(extra)}")
+            return True
+
+        # --- Notifications ---
+        if intent == "notifications":
+            data = await asyncio.to_thread(self.arena.get_notifications)
+            if not data:
+                await update.message.reply_text("No notifications.")
+                return True
+            lines = ["<b>Notifications</b>\n"]
+            if isinstance(data, list):
+                for item in data[:15]:
+                    if isinstance(item, dict):
+                        ntype = item.get("type", "")
+                        actor = item.get("actorHandle", item.get("actor", "?"))
+                        ntxt = item.get("text", item.get("content", ""))[:80]
+                        lines.append(f"[{escape(str(ntype))}] @{escape(str(actor))}: {escape(ntxt)}")
+                    else:
+                        lines.append(escape(str(item))[:100])
+            elif isinstance(data, dict):
+                for k, v in data.items():
+                    lines.append(f"{escape(str(k))}: {escape(str(v))}")
+            await send_long(update, "\n".join(lines), parse_mode=ParseMode.HTML)
+            return True
+
+        if intent == "clear_notifications":
+            result = await asyncio.to_thread(self.arena.mark_notifications_seen)
+            await update.message.reply_text(
+                "Notifications marked as seen." if result is not None else "Failed."
+            )
+            return True
+
+        # --- Stats ---
+        if intent == "shares":
+            stats = await asyncio.to_thread(self.arena.get_share_stats)
+            if not stats:
+                await update.message.reply_text("Could not load share stats.")
+                return True
+            lines = ["<b>Share Stats</b>\n"]
+            if isinstance(stats, dict):
+                for k, v in stats.items():
+                    lines.append(f"{escape(str(k))}: <code>{escape(str(v))}</code>")
+            else:
+                lines.append(escape(str(stats)))
+            await send_long(update, "\n".join(lines), parse_mode=ParseMode.HTML)
+            return True
+
+        if intent == "holdings":
+            data = await asyncio.to_thread(self.arena.get_holdings)
+            if not data:
+                await update.message.reply_text("Could not load holdings.")
+                return True
+            lines = ["<b>Holdings</b>\n"]
+            if isinstance(data, list):
+                for item in data[:20]:
+                    if isinstance(item, dict):
+                        name = item.get("handle", item.get("username", "?"))
+                        amount = item.get("amount", item.get("shares", "?"))
+                        lines.append(f"@{escape(str(name))}: {escape(str(amount))}")
+                    else:
+                        lines.append(escape(str(item)))
+            elif isinstance(data, dict):
+                for k, v in data.items():
+                    lines.append(f"{escape(str(k))}: <code>{escape(str(v))}</code>")
+            await send_long(update, "\n".join(lines), parse_mode=ParseMode.HTML)
+            return True
+
+        if intent == "earnings":
+            data = await asyncio.to_thread(self.arena.get_earnings)
+            if not data:
+                await update.message.reply_text("Could not load earnings.")
+                return True
+            lines = ["<b>Earnings</b>\n"]
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    lines.append(f"{escape(str(k))}: <code>{escape(str(v))}</code>")
+            else:
+                lines.append(escape(str(data)))
+            await send_long(update, "\n".join(lines), parse_mode=ParseMode.HTML)
+            return True
+
+        if intent == "holders":
+            data = await asyncio.to_thread(self.arena.get_share_holders)
+            await self._display_user_list(update, data, "Your Share Holders")
+            return True
+
+        # --- Chat ---
+        if intent == "conversations":
+            data = await asyncio.to_thread(self.arena.get_conversations)
+            if not data:
+                await update.message.reply_text("No conversations.")
+                return True
+            lines = ["<b>Conversations</b>\n"]
+            if isinstance(data, list):
+                for conv in data[:15]:
+                    if isinstance(conv, dict):
+                        cid = conv.get("id", conv.get("conversationId", "?"))
+                        name = conv.get("name", conv.get("handle", "?"))
+                        lines.append(f"<code>{escape(str(cid))}</code> — {escape(str(name))}")
+                    else:
+                        lines.append(escape(str(conv))[:100])
+            else:
+                lines.append(escape(str(data)))
+            await send_long(update, "\n".join(lines), parse_mode=ParseMode.HTML)
+            return True
+
+        # --- Communities ---
+        if intent == "communities":
+            data = await asyncio.to_thread(self.arena.get_top_communities)
+            if not data:
+                await update.message.reply_text("Could not load communities.")
+                return True
+            lines = ["<b>Top Communities</b>\n"]
+            if isinstance(data, list):
+                for c in data[:15]:
+                    if isinstance(c, dict):
+                        name = c.get("name", "?")
+                        cid = c.get("id", "?")
+                        members = c.get("membersCount", "?")
+                        lines.append(f"{escape(str(name))} (id: <code>{escape(str(cid))}</code>, members: {members})")
+                    else:
+                        lines.append(escape(str(c))[:100])
+            else:
+                lines.append(escape(str(data)))
+            await send_long(update, "\n".join(lines), parse_mode=ParseMode.HTML)
+            return True
+
+        # --- Like / Repost (need a thread ID from context) ---
+        if intent == "like":
+            # extra might be a thread ID if captured
+            if extra and extra != original:
+                result = await asyncio.to_thread(self.arena.like_thread, extra)
+                await update.message.reply_text("Liked." if result else "Failed to like.")
+            else:
+                await update.message.reply_text("Which thread? Use /like <thread_id>")
+            return True
+
+        if intent == "repost":
+            if extra and extra != original:
+                result = await asyncio.to_thread(self.arena.repost, extra)
+                await update.message.reply_text("Reposted." if result else "Failed to repost.")
+            else:
+                await update.message.reply_text("Which thread? Use /repost <thread_id>")
+            return True
+
+        return False
+
     async def _handle_arena_post_intent(self, update: Update, original_text: str, topic: str):
         """Handle natural language post request: generate content via LLM, then post to Arena."""
-        # Ask the LLM to generate Arena post content
+        # Extract topic from the message
+        lower = topic.lower()
+        # Clean up topic — remove arena/post keywords
+        for noise in ["arena", "post", "thread", "tweet", "on", "to", "a", "create", "make", "write"]:
+            lower = re.sub(rf"\b{noise}\b", "", lower)
+        clean_topic = lower.strip()
+        if not clean_topic or len(clean_topic) < 3:
+            clean_topic = topic  # Fall back to full text
+
         prompt = (
-            f"Write a short post for Arena (social media) about: {topic}\n\n"
+            f"Write a short post for Arena (social media) about: {clean_topic}\n\n"
             "Rules: No hashtags. No bold. No emojis. No markdown. "
             "Keep it under 280 characters. Just clean, natural text."
         )
