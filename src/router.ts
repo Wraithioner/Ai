@@ -113,6 +113,7 @@ ARENA
 /arena profile — Your profile
 /arena update <name|bio> <value> — Update profile
 /arena register <name> <handle> <bio> — Register agent
+/arena config — Show Arena env config status
 
 META
 /status — Dashboard
@@ -342,7 +343,7 @@ export async function route(text: string, user = "unknown"): Promise<string> {
         case "search":
           return subargs ? arena.searchUser(subargs) : "Usage: /arena search <query>";
         case "user":
-          return subargs ? arena.getUserByHandle(subargs) : "Usage: /arena user <handle>";
+          return arena.getUserByHandle(subargs || process.env.ARENA_HANDLE || "");
         case "trending":
           return arena.trending(parseInt(subargs) || 1);
         case "follow":
@@ -350,7 +351,7 @@ export async function route(text: string, user = "unknown"): Promise<string> {
         case "unfollow":
           return subargs ? arena.unfollow(subargs) : "Usage: /arena unfollow <handle>";
         case "followers":
-          return subargs ? arena.getFollowers(subargs) : "Usage: /arena followers <handle>";
+          return arena.getFollowers(subargs || process.env.ARENA_HANDLE || "");
 
         // Chat
         case "dm": {
@@ -378,7 +379,7 @@ export async function route(text: string, user = "unknown"): Promise<string> {
 
         // Shares
         case "shares":
-          return arena.shareStats(subargs || undefined);
+          return arena.shareStats(subargs || process.env.ARENA_HANDLE || undefined);
         case "holdings":
           return arena.holdings();
         case "earnings":
@@ -399,6 +400,10 @@ export async function route(text: string, user = "unknown"): Promise<string> {
           return arena.unseenNotifications();
         case "seen":
           return arena.markAllSeen();
+
+        // Config
+        case "config":
+          return arena.arenaConfig();
 
         // Profile
         case "profile":

@@ -12,6 +12,14 @@ function getAgentId(): string {
   return process.env.ARENA_AGENT_ID ?? "";
 }
 
+function getHandle(): string {
+  return process.env.ARENA_HANDLE ?? "";
+}
+
+function getVerificationCode(): string {
+  return process.env.ARENA_VERIFICATION_CODE ?? "";
+}
+
 function api(
   method: string,
   path: string,
@@ -68,6 +76,22 @@ function api(
 function fmt(obj: any): string {
   if (typeof obj === "string") return obj;
   return JSON.stringify(obj, null, 2).slice(0, 3800);
+}
+
+// ─── Config check ─────────────────────────────────────────
+
+export function arenaConfig(): string {
+  const key = getKey();
+  const id = getAgentId();
+  const handle = getHandle();
+  const code = getVerificationCode();
+  return [
+    "Arena Configuration:",
+    `API Key: ${key ? "set" : "NOT SET"}`,
+    `Agent ID: ${id || "not set"}`,
+    `Handle: ${handle ? `@${handle}` : "not set"}`,
+    `Verification Code: ${code ? "set" : "not set"}`,
+  ].join("\n");
 }
 
 // ─── Agent Profile ────────────────────────────────────────
