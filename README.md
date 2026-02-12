@@ -1,128 +1,108 @@
-# Atlas - Local AI Voice Agent
+# AI Telegram Bot
 
-A personal AI assistant that runs **100% on your PC**. No API keys, no cloud, no subscriptions, no Ollama.
+A Telegram chatbot powered by a local LLM. Runs on **Railway** with no external API keys needed — the AI model runs directly in the process.
 
-Say **"Atlas"** to get its attention, then talk naturally. It listens, thinks, and speaks back.
+## Features
 
-## What It Does
+- **Telegram chat** — send messages, get AI responses
+- **Per-user memory** — each user gets their own conversation history
+- **Configurable personality** — change the system prompt to anything
+- **Trainable** — fine-tune the model with your own data
+- **Rate limiting** — prevents abuse
+- **Railway-ready** — deploys with one click
 
-- **Listens** to your voice using your microphone (Whisper speech-to-text)
-- **Thinks** using a local LLM running directly in Python (trainable)
-- **Speaks** responses out loud (Piper TTS)
-- **Remembers** conversation context within a session
-- **Trainable** - fine-tune Atlas's brain with your own data
-- **Self-contained** - no external servers, no third-party dependencies at runtime
+## Deploy to Railway
 
-## Quick Start
+### 1. Get a Telegram bot token
 
-### Windows
+Message [@BotFather](https://t.me/BotFather) on Telegram and create a new bot. Copy the token.
 
-```cmd
-:: 1. Clone and install
-git clone <this-repo> && cd Ai
-scripts\install.bat
+### 2. Deploy on Railway
 
-:: 2. Start Atlas (text mode)
-python -m atlas.main --text-mode
+1. Push this repo to GitHub
+2. Go to [railway.app](https://railway.app) and create a new project from the repo
+3. In **Settings > Variables**, add:
+   ```
+   TELEGRAM_BOT_TOKEN=your_token_here
+   ```
+4. Railway auto-detects Python and deploys
 
-:: 3. Train Atlas's brain (optional)
-python -m atlas.main --train
-```
+### 3. Optional environment variables
 
-### Linux
+| Variable | Default | Description |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | (required) | Bot token from @BotFather |
+| `MODEL_NAME` | `Qwen/Qwen2.5-1.5B-Instruct` | HuggingFace model ID |
+| `SYSTEM_PROMPT` | (see config) | Bot personality / instructions |
+| `MAX_TOKENS` | `512` | Max response length |
+| `TEMPERATURE` | `0.7` | Creativity (0.0-1.0) |
+| `CONTEXT_WINDOW` | `10` | Exchanges to remember per user |
+| `MAX_USERS` | `100` | Max concurrent users in memory |
+| `LOG_LEVEL` | `INFO` | Logging verbosity |
+
+## Run Locally
 
 ```bash
-# 1. Clone and install
-git clone <this-repo> && cd Ai
-bash scripts/install.sh
+# Install
+pip install -r requirements.txt
 
-# 2. Start Atlas (text mode)
-python -m atlas.main --text-mode
+# Set your bot token
+export TELEGRAM_BOT_TOKEN="your_token_here"
 
-# 3. Train Atlas's brain (optional)
-python -m atlas.main --train
+# Start
+python -m atlas.main
 ```
-
-Or install manually: `pip install -r requirements.txt`
 
 ## Project Structure
 
 ```
 Ai/
-├── atlas/                      # Source code
-│   ├── core/                   # Core components
-│   │   ├── brain.py            #   LLM engine (runs model directly)
-│   │   ├── ears.py             #   Speech-to-text (Whisper + VAD)
-│   │   ├── voice.py            #   Text-to-speech (Piper / Windows SAPI)
-│   │   ├── eyes.py             #   Screen reading via OCR (EasyOCR)
-│   │   ├── actions.py          #   Command parsing & system actions
-│   │   ├── computer.py         #   Mouse & keyboard control (pyautogui)
-│   │   ├── safety.py           #   Safety guardrails & rate limiting
-│   │   └── config.py           #   Configuration & path management
-│   ├── training/               # Fine-tuning tools
-│   │   └── train.py            #   Training script
-│   └── main.py                 # Entry point & agent orchestration
+├── atlas/
+│   ├── core/
+│   │   ├── brain.py          # LLM engine (multi-user, memory managed)
+│   │   └── config.py         # Config loader with env var overrides
+│   ├── telegram/
+│   │   └── bot.py            # Telegram bot handler
+│   ├── training/
+│   │   └── train.py          # Fine-tuning script
+│   └── main.py               # Entry point
 ├── config/
-│   └── settings.yaml           # All settings in one place
+│   └── settings.yaml         # Default configuration
 ├── data/
-│   └── training/               # Your training data (JSONL files)
-│       └── atlas_personality.jsonl
-├── models/                     # Fine-tuned models saved here
-├── logs/                       # Log files
-├── scripts/
-│   ├── install.bat             # Windows installer
-│   ├── install.sh              # Linux installer
-│   └── uninstall.sh            # Remove service (Linux)
-└── requirements.txt
+│   └── training/             # Training data (JSONL)
+├── models/                   # Fine-tuned models
+├── Procfile                  # Railway process definition
+├── .dockerignore             # Lighter Railway builds
+└── requirements.txt          # Python dependencies
 ```
 
-## Training Atlas's Brain
+## Choosing a Model
 
-You can fine-tune Atlas to have a unique personality, custom knowledge, and specific behaviors.
-
-### 1. Add training data
-
-Edit `data/training/atlas_personality.jsonl` — each line is a conversation example:
-
-```json
-{"messages": [{"role": "system", "content": "Your name is Atlas."}, {"role": "user", "content": "What's your name?"}, {"role": "assistant", "content": "I'm Atlas, your personal AI."}]}
-```
-
-### 2. Run training
-
-```
-python -m atlas.main --train
-```
-
-### 3. Done
-
-Atlas automatically detects and uses the fine-tuned model from `models/atlas-brain/`.
-
-## Configuration
-
-Edit `config/settings.yaml` to customize:
-
-- **LLM model** - base model to use or fine-tune
-- **Voice** - change the TTS voice
-- **Whisper model size** - trade speed for accuracy
-- **System prompt** - define Atlas's personality
-- **Silence threshold** - how long to wait after you stop talking
-
-## Voice Commands
-
-| Say | Action |
-|---|---|
-| "Atlas, ..." | Atlas listens and responds |
-| "Atlas" (alone) | Atlas acknowledges and waits |
-| "goodbye" / "shut down" | Stops the agent |
-| "reset" / "forget everything" | Clears conversation memory |
-
-## Choosing a Base Model
-
-| Model | RAM Needed | Speed | Quality |
+| Model | RAM | Speed | Quality |
 |---|---|---|---|
-| `TinyLlama/TinyLlama-1.1B-Chat-v1.0` | ~2GB | Fast | Basic chat |
-| `Qwen/Qwen2.5-1.5B-Instruct` | ~3GB | Fast | Good quality (default) |
-| `microsoft/Phi-3-mini-4k-instruct` | ~8GB | Medium | Great quality |
+| `TinyLlama/TinyLlama-1.1B-Chat-v1.0` | ~2GB | Fast | Basic |
+| `Qwen/Qwen2.5-1.5B-Instruct` | ~3GB | Fast | Good (default) |
+| `Qwen/Qwen2.5-7B-Instruct` | ~14GB | Slow | Great |
 
-Switch models in `config/settings.yaml` — they auto-download on first run.
+Set via `MODEL_NAME` env var or in `config/settings.yaml`.
+
+## Train the Bot
+
+Fine-tune with your own data to give the bot a custom personality:
+
+```bash
+# Add training data to data/training/*.jsonl
+# Format: {"messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}
+
+python -m atlas.training.train
+```
+
+The bot auto-detects fine-tuned models from `models/atlas-brain/`.
+
+## Bot Commands
+
+| Command | Action |
+|---|---|
+| `/start` | Welcome message |
+| `/reset` | Clear conversation memory |
+| `/help` | Show commands |

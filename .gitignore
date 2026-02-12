@@ -4,7 +4,7 @@ __pycache__/
 *.egg-info/
 .venv/
 
-# Atlas models (too large for git)
+# Models (too large for git)
 models/atlas-brain/
 models/checkpoints/
 !models/.gitkeep
@@ -20,3 +20,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Environment
+.env

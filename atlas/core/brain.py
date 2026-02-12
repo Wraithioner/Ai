@@ -1,8 +1,11 @@
 """LLM brain - runs a language model directly in Python. No external servers needed."""
 
+import gc
 import json
 import logging
 import re
+import time
+from collections import OrderedDict
 from pathlib import Path
 
 import torch
@@ -10,45 +13,27 @@ from atlas.core.config import MODEL_CACHE_DIR, MODELS_DIR
 
 logger = logging.getLogger(__name__)
 
-ACTION_PROMPT_TEMPLATE = """\
-You are an AI controlling a computer. You can see the screen via OCR text.
-
-CURRENT SCREEN TEXT:
-{screen_text}
-
-USER REQUEST: {user_request}
-
-Respond with ONLY a JSON object (no other text) choosing one action:
-{{"action": "click", "target": "exact text on screen to click", "reason": "why"}}
-{{"action": "type", "value": "text to type", "reason": "why"}}
-{{"action": "press", "value": "key name like enter/tab/escape", "reason": "why"}}
-{{"action": "hotkey", "value": "ctrl+c or alt+tab etc", "reason": "why"}}
-{{"action": "scroll", "value": "up or down", "reason": "why"}}
-{{"action": "done", "reason": "task is complete because..."}}
-{{"action": "fail", "reason": "cannot do this because..."}}
-
-Rules:
-- Pick the SINGLE best next action to make progress on the user's request.
-- For "click", the target must be text you can see on screen.
-- Only output the JSON object, nothing else."""
-
 
 class Brain:
-    """Loads and runs a local LLM directly using transformers. No Ollama needed.
+    """Loads and runs a local LLM using transformers.
 
-    Supports loading a fine-tuned model from models/ if one exists,
-    otherwise downloads the base model from HuggingFace.
-    Auto-detects CUDA GPU and uses float16 acceleration when available.
+    Supports multi-user conversations (each Telegram user gets their own history).
+    Uses an LRU cache to evict the oldest users when max_users is reached.
+    Runs GC after inference to keep Railway memory stable.
     """
 
     def __init__(self, config: dict):
         llm_cfg = config["llm"]
         self.model_name = llm_cfg["model"]
-        self.system_prompt = llm_cfg["system_prompt"].strip()
+        self.system_prompt = llm_cfg.get("system_prompt", "You are a helpful AI assistant.").strip()
         self.max_tokens = llm_cfg.get("max_tokens", 256)
         self.temperature = llm_cfg.get("temperature", 0.7)
         self.max_context = llm_cfg.get("context_window", 10)
-        self.conversation: list[dict] = []
+        self.max_users = config.get("telegram", {}).get("max_users", 100)
+
+        # Per-user conversation histories (LRU eviction)
+        self._conversations: OrderedDict[int, list[dict]] = OrderedDict()
+
         self.model = None
         self.tokenizer = None
         self.device = None
@@ -61,76 +46,71 @@ class Brain:
         return None
 
     def initialize(self):
-        """Download (if needed) and load the model into memory.
-
-        Auto-detects CUDA and uses float16 on GPU for speed,
-        falls back to float32 on CPU.
-        """
+        """Download (if needed) and load the model into memory."""
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        # Auto-detect best device and dtype
         if torch.cuda.is_available():
             self.device = "cuda"
             dtype = torch.float16
             device_map = "auto"
-            logger.info("CUDA GPU detected! Using float16 acceleration.")
+            logger.info("CUDA GPU detected — using float16.")
         else:
             self.device = "cpu"
             dtype = torch.float32
             device_map = "cpu"
-            logger.info("No GPU detected. Running on CPU with float32.")
+            logger.info("No GPU — running on CPU with float32.")
 
-        # Check for a local fine-tuned model first
         local_model = self._find_local_model()
 
         if local_model:
             model_source = str(local_model)
             cache_dir = None
-            logger.info("Loading YOUR fine-tuned Atlas brain from %s", local_model)
+            logger.info("Loading fine-tuned model from %s", local_model)
         else:
             model_source = self.model_name
             cache_dir = str(MODEL_CACHE_DIR / self.model_name.replace("/", "--"))
-            logger.info("Loading base model '%s'...", self.model_name)
-            logger.info("This may download the model on first run.")
+            logger.info("Loading model '%s'...", self.model_name)
 
-        try:
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_source,
-                cache_dir=cache_dir,
-                trust_remote_code=False,
-            )
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_source,
-                cache_dir=cache_dir,
-                torch_dtype=dtype,
-                device_map=device_map,
-                trust_remote_code=False,
-            )
-            self.model.eval()
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_source, cache_dir=cache_dir, trust_remote_code=False,
+        )
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_source, cache_dir=cache_dir,
+            torch_dtype=dtype, device_map=device_map,
+            trust_remote_code=False,
+        )
+        self.model.eval()
+        logger.info("Model loaded on %s.", self.device)
 
-            if local_model:
-                logger.info("Atlas brain loaded (fine-tuned) on %s.", self.device)
-            else:
-                logger.info(
-                    "Model '%s' loaded on %s (%s).",
-                    self.model_name, self.device, dtype,
-                )
-        except Exception as e:
-            logger.error("Failed to load model: %s", e)
-            raise
+        # Free any leftover allocation from model loading
+        gc.collect()
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
 
-    def _build_messages(self) -> list[dict]:
-        """Build the message list with system prompt and conversation history."""
+    def _get_conversation(self, user_id: int) -> list[dict]:
+        """Get or create conversation history for a user (LRU order)."""
+        if user_id in self._conversations:
+            self._conversations.move_to_end(user_id)
+            return self._conversations[user_id]
+
+        # Evict oldest user if at capacity
+        if len(self._conversations) >= self.max_users:
+            evicted_id, _ = self._conversations.popitem(last=False)
+            logger.debug("Evicted conversation for user %d (at capacity %d)", evicted_id, self.max_users)
+
+        self._conversations[user_id] = []
+        return self._conversations[user_id]
+
+    def _build_messages(self, user_id: int) -> list[dict]:
+        """Build the message list with system prompt and trimmed history."""
         messages = [{"role": "system", "content": self.system_prompt}]
-        trimmed = self.conversation[-(self.max_context * 2):]
+        conversation = self._get_conversation(user_id)
+        trimmed = conversation[-(self.max_context * 2):]
         messages.extend(trimmed)
         return messages
 
     def _generate(self, messages: list[dict], max_new_tokens: int | None = None) -> str:
-        """Run inference on a list of chat messages. Returns the raw reply text.
-
-        Uses apply_chat_template with tokenize=True to avoid double tokenization.
-        """
+        """Run inference on a list of chat messages."""
         max_new_tokens = max_new_tokens or self.max_tokens
 
         inputs = self.tokenizer.apply_chat_template(
@@ -141,13 +121,11 @@ class Brain:
             return_dict=True,
         )
 
-        # Move inputs to the same device as the model
         if self.device == "cuda":
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         input_len = inputs["input_ids"].shape[1]
 
-        # temperature=0 requires do_sample=False (greedy decoding)
         use_sampling = self.temperature > 0
         gen_kwargs = dict(
             **inputs,
@@ -161,18 +139,30 @@ class Brain:
             outputs = self.model.generate(**gen_kwargs)
 
         new_tokens = outputs[0][input_len:]
-        return self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        reply = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
-    def think(self, user_text: str) -> str:
-        """Send user text to the LLM and get a conversational response."""
-        self.conversation.append({"role": "user", "content": user_text})
+        # Free intermediate tensors
+        del inputs, outputs
+        gc.collect()
 
-        # Trim conversation history to prevent unbounded memory growth
+        return reply
+
+    def think(self, user_text: str, user_id: int = 0) -> str:
+        """Send user text to the LLM and get a response.
+
+        Args:
+            user_text: The user's message.
+            user_id: Telegram user ID for per-user conversation tracking.
+        """
+        conversation = self._get_conversation(user_id)
+        conversation.append({"role": "user", "content": user_text})
+
+        # Trim history
         max_entries = self.max_context * 2
-        if len(self.conversation) > max_entries:
-            self.conversation = self.conversation[-max_entries:]
+        if len(conversation) > max_entries:
+            del conversation[:len(conversation) - max_entries]
 
-        messages = self._build_messages()
+        messages = self._build_messages(user_id)
 
         try:
             reply = self._generate(messages)
@@ -180,54 +170,16 @@ class Brain:
                 reply = "I'm not sure how to respond to that."
         except Exception as e:
             reply = "Something went wrong while thinking."
-            logger.error("Model inference error: %s", e)
+            logger.error("Inference error: %s", e)
 
-        self.conversation.append({"role": "assistant", "content": reply})
+        conversation.append({"role": "assistant", "content": reply})
         return reply
 
-    def plan_action(self, user_request: str, screen_text: str) -> dict:
-        """Ask the LLM to decide the next computer action based on screen OCR.
+    def reset_conversation(self, user_id: int = 0):
+        """Clear conversation history for a user."""
+        self._conversations.pop(user_id, None)
+        logger.info("Conversation cleared for user %d.", user_id)
 
-        Returns a dict like:
-            {"action": "click", "target": "File", "reason": "to open menu"}
-            {"action": "type", "value": "hello", "reason": "user asked to type"}
-            {"action": "done", "reason": "task complete"}
-            {"action": "fail", "reason": "can't find the button"}
-        """
-        prompt = ACTION_PROMPT_TEMPLATE.format(
-            screen_text=screen_text[:3000],  # Truncate to avoid token overflow
-            user_request=user_request,
-        )
-
-        messages = [
-            {"role": "system", "content": "You are a computer control assistant. Output only valid JSON."},
-            {"role": "user", "content": prompt},
-        ]
-
-        try:
-            raw = self._generate(messages, max_new_tokens=256)
-            logger.debug("plan_action raw LLM output: %s", raw)
-
-            # Extract JSON from the response (LLM might wrap it in markdown)
-            json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if json_match:
-                action = json.loads(json_match.group())
-                # Validate required field
-                if "action" not in action:
-                    action = {"action": "fail", "reason": "LLM returned no action field"}
-                return action
-            else:
-                logger.warning("No JSON found in LLM output: %s", raw[:200])
-                return {"action": "fail", "reason": "Could not parse action from LLM response"}
-
-        except json.JSONDecodeError as e:
-            logger.error("JSON parse error in plan_action: %s", e)
-            return {"action": "fail", "reason": f"Invalid JSON from LLM: {e}"}
-        except Exception as e:
-            logger.error("plan_action error: %s", e)
-            return {"action": "fail", "reason": str(e)}
-
-    def reset_conversation(self):
-        """Clear conversation history."""
-        self.conversation.clear()
-        logger.info("Conversation history cleared.")
+    def active_users(self) -> int:
+        """Return the number of users with active conversations."""
+        return len(self._conversations)

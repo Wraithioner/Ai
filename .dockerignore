@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+.claude
+__pycache__
+*.pyc
+*.pyo
+models/atlas-brain/
+models/checkpoints/
+logs/*.log
+*.md
+scripts/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

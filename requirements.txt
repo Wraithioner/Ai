@@ -1,16 +1,15 @@
+# Core LLM
 transformers>=4.36.0
 accelerate>=0.25.0
 huggingface-hub>=0.20.0
 torch>=2.1.0
 numpy>=1.24.0
+
+# Config
 pyyaml>=6.0
-openai-whisper>=20231117
-piper-tts>=1.2.0
-torchaudio>=2.1.0
-PyAudio>=0.2.14
-mss>=9.0.0
-Pillow>=10.0.0
-easyocr>=1.7.0
-pyautogui>=0.9.54
-pyperclip>=1.8.0
+
+# Telegram bot
+python-telegram-bot>=21.0
+
+# HTTP
 requests>=2.31.0
