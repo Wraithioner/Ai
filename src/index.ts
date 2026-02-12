@@ -3,6 +3,7 @@
 import { createBot, setupBot } from "./bot.js";
 import { persona } from "./personality.js";
 import { stopScheduler } from "./skills/scheduler.js";
+import { stopCronScheduler } from "./skills/cron.js";
 
 async function main() {
   console.log(persona.status.booting());
@@ -14,6 +15,7 @@ async function main() {
   const shutdown = () => {
     console.log(persona.status.shutdown());
     stopScheduler();
+    stopCronScheduler();
     bot.stop();
     process.exit(0);
   };

@@ -7,6 +7,8 @@ import { config } from "./utils/config.js";
 import { route, HELP } from "./router.js";
 import { persona } from "./personality.js";
 import * as scheduler from "./skills/scheduler.js";
+import * as cronSkill from "./skills/cron.js";
+import { checkRateLimit } from "./utils/ratelimit.js";
 
 const MAX_MSG = 4096;
 const UPLOAD_DIR = process.env.UPLOAD_DIR ?? "/app/data/uploads";
@@ -32,6 +34,17 @@ export function createBot(): Bot {
     const userId = ctx.from?.id ?? 0;
     if (config.ownerId !== 0 && userId !== config.ownerId) {
       await ctx.reply(persona.responses.unauthorized, { parse_mode: "Markdown" });
+      return;
+    }
+    await next();
+  });
+
+  // --- Rate limiting middleware ---
+  bot.use(async (ctx, next) => {
+    const userId = ctx.from?.id ?? 0;
+    const { allowed, remaining } = checkRateLimit(userId);
+    if (!allowed) {
+      await ctx.reply(`Slow down. Rate limited — try again in ${remaining}s.`);
       return;
     }
     await next();
@@ -156,11 +169,14 @@ export async function setupBot(bot: Bot) {
     { command: "ping", description: "Ping (or check bot)" },
     { command: "id", description: "Your Telegram ID" },
     { command: "history", description: "Command history" },
+    { command: "grep", description: "Search file contents" },
+    { command: "cron", description: "Recurring task" },
+    { command: "alias", description: "Create shortcut" },
   ];
   await bot.api.setMyCommands(commands);
   console.log(`${persona.name} commands menu set.`);
 
-  // Start reminder scheduler with personality
+  // Start reminder scheduler
   scheduler.registerCallback(async (message: string) => {
     if (config.ownerId === 0) return;
     try {
@@ -173,7 +189,24 @@ export async function setupBot(bot: Bot) {
     }
   });
   scheduler.startScheduler();
-  console.log("Scheduler started.");
+
+  // Start cron scheduler
+  cronSkill.registerCronCallback(async (command: string) => {
+    if (config.ownerId === 0) return;
+    try {
+      const { route } = await import("./router.js");
+      const result = await route(command, "cron");
+      await bot.api.sendMessage(
+        config.ownerId,
+        `**Cron executed:** \`${command}\`\n\n${result}`,
+        { parse_mode: "Markdown" }
+      );
+    } catch (e) {
+      console.error("Cron execution failed:", e);
+    }
+  });
+  cronSkill.startCronScheduler();
+  console.log("Schedulers started.");
 }
 
 /** Send a message, splitting if too long. */

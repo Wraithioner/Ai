@@ -7,86 +7,101 @@ import * as git from "./skills/git.js";
 import * as notes from "./skills/notes.js";
 import * as scheduler from "./skills/scheduler.js";
 import * as comms from "./skills/comms.js";
+import * as cronSkill from "./skills/cron.js";
+import * as alias from "./skills/alias.js";
+import * as grepSkill from "./skills/grep.js";
 import { runPython } from "./utils/python.js";
 import { persona } from "./personality.js";
 import { evalJS } from "./skills/eval.js";
 import * as status from "./skills/status.js";
 import * as history from "./skills/history.js";
+import { safeEnvValue, listSafeEnvVars, codeBlock } from "./utils/sanitize.js";
 
-const HELP = `**Your Personal Agent** — here's everything I can do:
+const HELP = `**${persona.name}** — your personal agent. Here's everything:
 
 **System**
-/run \`<cmd>\` — Execute a shell command
-/sysinfo — System information
-/ps \`[filter]\` — List processes
-/kill \`<pid>\` — Kill a process
+/run \`<cmd>\` — Shell command
+/sysinfo — System info
+/ps \`[filter]\` — Processes
+/kill \`<pid>\` — Kill process
 /uptime — Bot uptime
-/env \`[name]\` — Show environment variables
+/env \`[name]\` — Environment vars (sensitive masked)
 
 **Files**
 /ls \`[path]\` — List directory
-/read \`<path>\` — Read a file
-/head \`<path>\` \`[lines]\` — First N lines
-/write \`<path>\` \`<content>\` — Write to file
-/rm \`<path>\` — Delete a file
-/find \`<dir>\` \`<pattern>\` — Search files by name
+/read \`<path>\` — Read file
+/head \`<path>\` \`[n]\` — First N lines
+/write \`<path>\` \`<content>\` — Write file
+/rm \`<path>\` — Delete file
+/find \`<dir>\` \`<pattern>\` — Find files
+/grep \`<pattern>\` \`[dir]\` — Search file contents
 
 **Network**
-/fetch \`<url>\` — Fetch a webpage
-/download \`<url>\` \`[name]\` — Download a file
+/fetch \`<url>\` — Fetch webpage
+/download \`<url>\` \`[name]\` — Download file
 /downloads — List downloads
-/ping \`<host>\` — Ping a host
+/ping \`<host>\` — Ping host
 /dns \`<domain>\` — DNS lookup
 /headers \`<url>\` — HTTP headers
 
 **Git**
-/git status — Repo status
-/git log \`[n]\` — Recent commits
-/git diff — Changed files
-/git clone \`<url>\` — Clone a repo
-/git pull — Pull latest
-/git branch — List branches
+/git \`status|log|diff|clone|pull|branch\`
 
 **Notes**
-/note \`<text>\` — Save a note
-/notes — List notes
-/getnote \`<id>\` — View note
-/delnote \`<id>\` — Delete note
+/note \`<text>\` — Save note
+/notes — List all
+/getnote \`<id>\` — View
+/delnote \`<id>\` — Delete
 /clearnotes — Clear all
 
-**Reminders**
-/remind \`<min>\` \`<msg>\` — Set reminder
+**Reminders & Cron**
+/remind \`<min>\` \`<msg>\` — One-time reminder
 /reminders — List pending
 /cancel \`<id>\` — Cancel reminder
+/cron \`<min>\` \`<cmd>\` — Recurring task
+/crons — List cron jobs
+/rmcron \`<id>\` — Remove cron
 
 **Communication**
 /email \`<to>\` \`<subject>\` \`<body>\` — Send email
-/webhook \`<url>\` \`<msg>\` — Send webhook
-/discord \`<webhook_url>\` \`<msg>\` — Send to Discord
-/slack \`<webhook_url>\` \`<msg>\` — Send to Slack
-/api \`<METHOD>\` \`<url>\` \`[body]\` — HTTP API call
+/webhook \`<url>\` \`<msg>\` — Webhook
+/discord \`<url>\` \`<msg>\` — Discord
+/slack \`<url>\` \`<msg>\` — Slack
+/api \`<METHOD>\` \`<url>\` \`[body]\` — API call
 
 **Code**
-/eval \`<js>\` — Run JavaScript (sandboxed, instant)
-/py \`<code>\` — Run Python code
-/scrape \`<url>\` — Scrape a webpage
+/eval \`<js>\` — JavaScript (sandboxed)
+/py \`<code>\` — Python
+/scrape \`<url>\` — Scrape page
 
-**General**
+**Tools**
+/alias \`<name>\` \`<cmd>\` — Create shortcut
+/aliases — List aliases
+/rmalias \`<name>\` — Remove alias
+/sendfile \`<path>\` — Send file to chat
+
+**Meta**
+/status — Dashboard
+/history \`[n]\` — Command log
+/clearhistory — Clear log
 /help — This message
-/status — Dashboard overview
-/history \`[n]\` — Command history
-/clearhistory — Clear history
-/ping — Am I alive?
 /id — Your Telegram ID`;
 
 export { HELP };
 
 export async function route(text: string, user = "unknown"): Promise<string> {
   const parts = text.split(/\s+/);
-  const cmd = parts[0].toLowerCase().split("@")[0]; // strip @botname
+  let cmd = parts[0].toLowerCase().split("@")[0];
   const args = text.slice(parts[0].length).trim();
 
-  // Track command
+  // Check for alias
+  const aliasCmd = alias.resolveAlias(cmd.slice(1));
+  if (aliasCmd) {
+    const fullCmd = args ? `${aliasCmd} ${args}` : aliasCmd;
+    return route(fullCmd, user);
+  }
+
+  // Track
   history.record(text, user);
   status.trackCommand(cmd);
 
@@ -96,7 +111,7 @@ export async function route(text: string, user = "unknown"): Promise<string> {
     case "/help":
       return HELP;
     case "/id":
-      return "__ID__"; // handled specially in bot.ts
+      return "__ID__";
 
     // --- System ---
     case "/run":
@@ -110,8 +125,8 @@ export async function route(text: string, user = "unknown"): Promise<string> {
     case "/uptime":
       return system.botUptime();
     case "/env":
-      if (!args) return "Usage: `/env <name>` or `/env` to list all";
-      return process.env[args.trim()] ?? `${args.trim()} not set`;
+      if (!args) return codeBlock(listSafeEnvVars());
+      return safeEnvValue(args.trim());
 
     // --- Files ---
     case "/ls":
@@ -134,6 +149,11 @@ export async function route(text: string, user = "unknown"): Promise<string> {
       const p = args.split(/\s+/, 2);
       if (p.length < 2) return "Usage: `/find <dir> <pattern>`";
       return files.searchFiles(p[0], p[1]);
+    }
+    case "/grep": {
+      const p = args.split(/\s+/, 2);
+      if (!p[0]) return "Usage: `/grep <pattern> [dir]`";
+      return grepSkill.grep(p[0], p[1] || ".");
     }
 
     // --- Network ---
@@ -166,7 +186,7 @@ export async function route(text: string, user = "unknown"): Promise<string> {
         case "clone": return subargs ? git.gitClone(subargs) : "Usage: `/git clone <url>`";
         case "pull": return git.gitPull();
         case "branch": return git.gitBranch();
-        default: return "Git subcommands: status, log, diff, clone, pull, branch";
+        default: return "Git: status, log, diff, clone, pull, branch";
       }
     }
 
@@ -195,10 +215,23 @@ export async function route(text: string, user = "unknown"): Promise<string> {
     case "/cancel":
       return args ? scheduler.cancelReminder(args.trim()) : "Usage: `/cancel <id>`";
 
+    // --- Cron ---
+    case "/cron": {
+      const p = args.split(/\s+/, 2);
+      const mins = parseInt(p[0]);
+      const cmd = p[1];
+      if (isNaN(mins) || !cmd) return "Usage: `/cron <interval_min> <command>`";
+      return cronSkill.addCron(mins, cmd);
+    }
+    case "/crons":
+      return cronSkill.listCrons();
+    case "/rmcron":
+      return args ? cronSkill.removeCron(args.trim()) : "Usage: `/rmcron <id>`";
+
     // --- Communication ---
     case "/email": {
       const p = args.split(/\s+/, 3);
-      if (p.length < 3) return "Usage: `/email <to> <subject> <body>`\nSubject with spaces: use quotes";
+      if (p.length < 3) return "Usage: `/email <to> <subject> <body>`";
       const to = p[0];
       const rest = args.slice(to.length).trim();
       const subjEnd = rest.indexOf(" ");
@@ -222,7 +255,7 @@ export async function route(text: string, user = "unknown"): Promise<string> {
     }
     case "/api": {
       const p = args.split(/\s+/, 3);
-      if (p.length < 2) return "Usage: `/api <GET|POST|PUT|DELETE> <url> [json_body]`";
+      if (p.length < 2) return "Usage: `/api <GET|POST|PUT|DELETE> <url> [body]`";
       return comms.apiCall(p[0], p[1], p[2]);
     }
 
@@ -233,6 +266,17 @@ export async function route(text: string, user = "unknown"): Promise<string> {
       return args ? runPython("run_code.py", [args]) : "Usage: `/py <code>`";
     case "/scrape":
       return args ? runPython("scrape.py", [args.trim()]) : "Usage: `/scrape <url>`";
+
+    // --- Aliases ---
+    case "/alias": {
+      const p = args.split(/\s+/, 2);
+      if (p.length < 2) return "Usage: `/alias <name> <command>`";
+      return alias.setAlias(p[0], p[1]);
+    }
+    case "/aliases":
+      return alias.listAliases();
+    case "/rmalias":
+      return args ? alias.removeAlias(args.trim()) : "Usage: `/rmalias <name>`";
 
     // --- Meta ---
     case "/status":
