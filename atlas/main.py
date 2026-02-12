@@ -1,15 +1,16 @@
-"""Entry point — starts the Telegram bot with the LLM brain."""
+"""Entry point — starts the Telegram bot with LLM brain and Arena integration."""
 
 import logging
 import sys
 
 from atlas.core.config import load_config
 from atlas.core.brain import Brain
+from atlas.arena.client import ArenaClient
 from atlas.telegram.bot import TelegramBot
 
 
 def main():
-    """Load config, initialize the LLM, and start the Telegram bot."""
+    """Load config, initialize LLM + Arena, and start the Telegram bot."""
     config = load_config()
 
     # Logging — Railway captures stdout, no file needed
@@ -31,8 +32,15 @@ def main():
     brain.initialize()
     logger.info("Model ready.")
 
+    # Initialize Arena client
+    arena = ArenaClient(config)
+    if arena.configured:
+        logger.info("Arena client configured (handle: %s)", arena.handle)
+    else:
+        logger.warning("Arena credentials not set — Arena features disabled.")
+
     # Start the Telegram bot
-    bot = TelegramBot(brain, config)
+    bot = TelegramBot(brain, config, arena=arena)
     bot.run()
 
 
