@@ -66,11 +66,11 @@ export const persona = {
 
   // Help header
   helpHeader: () =>
-    `I'm **${persona.name}** — your personal agent.\nSharp, fast, always on. Here's what I do:\n`,
+    `I'm *${persona.name}* — your personal agent.\nSharp, fast, always on. Here's what I do:\n`,
 
   // Welcome message
   welcome: (userName: string) =>
-    `${persona.greetings[Math.floor(Math.random() * persona.greetings.length)]}\n\nHey **${userName}** — I'm **${persona.name}**, your personal agent.`,
+    `${persona.greetings[Math.floor(Math.random() * persona.greetings.length)]}\n\nHey *${userName}* — I'm *${persona.name}*, your personal agent.`,
 
   // Status messages
   status: {

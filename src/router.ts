@@ -17,9 +17,9 @@ import * as status from "./skills/status.js";
 import * as history from "./skills/history.js";
 import { safeEnvValue, listSafeEnvVars, codeBlock } from "./utils/sanitize.js";
 
-const HELP = `**${persona.name}** — your personal agent. Here's everything:
+const HELP = `*${persona.name}* — your personal agent. Here's everything:
 
-**System**
+*System*
 /run \`<cmd>\` — Shell command
 /sysinfo — System info
 /ps \`[filter]\` — Processes
@@ -27,7 +27,7 @@ const HELP = `**${persona.name}** — your personal agent. Here's everything:
 /uptime — Bot uptime
 /env \`[name]\` — Environment vars (sensitive masked)
 
-**Files**
+*Files*
 /ls \`[path]\` — List directory
 /read \`<path>\` — Read file
 /head \`<path>\` \`[n]\` — First N lines
@@ -36,7 +36,7 @@ const HELP = `**${persona.name}** — your personal agent. Here's everything:
 /find \`<dir>\` \`<pattern>\` — Find files
 /grep \`<pattern>\` \`[dir]\` — Search file contents
 
-**Network**
+*Network*
 /fetch \`<url>\` — Fetch webpage
 /download \`<url>\` \`[name]\` — Download file
 /downloads — List downloads
@@ -44,17 +44,17 @@ const HELP = `**${persona.name}** — your personal agent. Here's everything:
 /dns \`<domain>\` — DNS lookup
 /headers \`<url>\` — HTTP headers
 
-**Git**
+*Git*
 /git \`status|log|diff|clone|pull|branch\`
 
-**Notes**
+*Notes*
 /note \`<text>\` — Save note
 /notes — List all
 /getnote \`<id>\` — View
 /delnote \`<id>\` — Delete
 /clearnotes — Clear all
 
-**Reminders & Cron**
+*Reminders and Cron*
 /remind \`<min>\` \`<msg>\` — One-time reminder
 /reminders — List pending
 /cancel \`<id>\` — Cancel reminder
@@ -62,25 +62,25 @@ const HELP = `**${persona.name}** — your personal agent. Here's everything:
 /crons — List cron jobs
 /rmcron \`<id>\` — Remove cron
 
-**Communication**
+*Communication*
 /email \`<to>\` \`<subject>\` \`<body>\` — Send email
 /webhook \`<url>\` \`<msg>\` — Webhook
 /discord \`<url>\` \`<msg>\` — Discord
 /slack \`<url>\` \`<msg>\` — Slack
 /api \`<METHOD>\` \`<url>\` \`[body]\` — API call
 
-**Code**
+*Code*
 /eval \`<js>\` — JavaScript (sandboxed)
 /py \`<code>\` — Python
 /scrape \`<url>\` — Scrape page
 
-**Tools**
+*Tools*
 /alias \`<name>\` \`<cmd>\` — Create shortcut
 /aliases — List aliases
 /rmalias \`<name>\` — Remove alias
 /sendfile \`<path>\` — Send file to chat
 
-**Meta**
+*Meta*
 /status — Dashboard
 /history \`[n]\` — Command log
 /clearhistory — Clear log

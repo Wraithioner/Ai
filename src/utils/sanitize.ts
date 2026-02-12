@@ -41,6 +41,11 @@ export function escapeMarkdown(text: string): string {
   return text.replace(/([_*\[\]()~`>#+\-=|{}.!])/g, "\\$1");
 }
 
+/** Escape a string for safe use in shell commands. */
+export function shellEscape(arg: string): string {
+  return "'" + arg.replace(/'/g, "'\\''") + "'";
+}
+
 /** Wrap output in a code block for safe Telegram display. */
 export function codeBlock(text: string, lang = ""): string {
   const escaped = text.replace(/`/g, "'");

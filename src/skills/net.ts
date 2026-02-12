@@ -5,6 +5,7 @@ import fs from "fs";
 import path from "path";
 import https from "https";
 import http from "http";
+import { shellEscape } from "../utils/sanitize.js";
 
 const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR ?? "/app/data/downloads";
 
@@ -90,7 +91,7 @@ export function listDownloads(): string {
 
 export function ping(host: string): Promise<string> {
   return new Promise((resolve) => {
-    exec(`ping -c 4 ${host}`, { timeout: 10_000 }, (error, stdout) => {
+    exec(`ping -c 4 ${shellEscape(host)}`, { timeout: 10_000 }, (error, stdout) => {
       if (error) resolve(`Ping failed: ${error.message}`);
       else resolve(stdout.trim());
     });
@@ -99,7 +100,7 @@ export function ping(host: string): Promise<string> {
 
 export function dnsLookup(domain: string): Promise<string> {
   return new Promise((resolve) => {
-    exec(`dig +short ${domain}`, { timeout: 5_000 }, (error, stdout) => {
+    exec(`dig +short ${shellEscape(domain)}`, { timeout: 5_000 }, (error, stdout) => {
       if (error) resolve(`DNS lookup failed: ${error.message}`);
       else resolve(stdout.trim() || "No records found.");
     });
@@ -108,7 +109,7 @@ export function dnsLookup(domain: string): Promise<string> {
 
 export function curl(url: string): Promise<string> {
   return new Promise((resolve) => {
-    exec(`curl -sI '${url}' | head -20`, { timeout: 10_000 }, (error, stdout) => {
+    exec(`curl -sI ${shellEscape(url)} | head -20`, { timeout: 10_000 }, (error, stdout) => {
       if (error) resolve(`Curl failed: ${error.message}`);
       else resolve(stdout.trim());
     });

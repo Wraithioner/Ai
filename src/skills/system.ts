@@ -2,6 +2,7 @@
 
 import { exec } from "child_process";
 import os from "os";
+import { shellEscape } from "../utils/sanitize.js";
 
 export function runCommand(command: string, timeout = 30_000): Promise<string> {
   return new Promise((resolve) => {
@@ -44,7 +45,7 @@ export function sysInfo(): string {
 
 export async function listProcesses(filter?: string): Promise<string> {
   const cmd = filter
-    ? `ps aux | grep -i '${filter}' | grep -v grep | head -20`
+    ? `ps aux | grep -i ${shellEscape(filter)} | grep -v grep | head -20`
     : "ps aux --sort=-%mem | head -20";
   return runCommand(cmd);
 }

@@ -191,7 +191,7 @@ export async function setupBot(bot: Bot) {
       const result = await route(command, "cron");
       await bot.api.sendMessage(
         config.ownerId,
-        `**Cron executed:** \`${command}\`\n\n${result}`,
+        `*Cron executed:* \`${command}\`\n\n${result}`,
         { parse_mode: "Markdown" }
       );
     } catch (e) {
@@ -241,23 +241,22 @@ async function handleMediaUpload(ctx: any, type: string) {
   }
 }
 
-/** Send a message, splitting if too long. */
+/** Send a message, splitting if too long. Falls back to plain text on parse error. */
 async function sendSafe(ctx: any, text: string) {
-  if (text.length <= MAX_MSG) {
-    try {
-      await ctx.reply(text, { parse_mode: "Markdown" });
-    } catch {
-      await ctx.reply(text);
-    }
-    return;
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += MAX_MSG) {
+    chunks.push(text.slice(i, i + MAX_MSG));
   }
 
-  for (let i = 0; i < text.length; i += MAX_MSG) {
-    const chunk = text.slice(i, i + MAX_MSG);
+  for (const chunk of chunks) {
     try {
       await ctx.reply(chunk, { parse_mode: "Markdown" });
     } catch {
-      await ctx.reply(chunk);
+      try {
+        await ctx.reply(chunk);
+      } catch (e) {
+        console.error("[sendSafe] Failed to send message:", e);
+      }
     }
   }
 }

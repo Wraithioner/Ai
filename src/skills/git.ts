@@ -1,6 +1,7 @@
 /** Git skills — repo management from Telegram. */
 
 import { exec } from "child_process";
+import { shellEscape } from "../utils/sanitize.js";
 
 const REPOS_DIR = process.env.REPOS_DIR ?? "/app/data/repos";
 
@@ -33,7 +34,7 @@ export function gitDiff(cwd?: string): Promise<string> {
 }
 
 export function gitClone(url: string): Promise<string> {
-  return git(`clone ${url}`, REPOS_DIR);
+  return git(`clone ${shellEscape(url)}`, REPOS_DIR);
 }
 
 export function gitPull(cwd?: string): Promise<string> {
