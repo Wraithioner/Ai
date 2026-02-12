@@ -23,23 +23,35 @@ def main():
     logger = logging.getLogger("atlas")
 
     logger.info("=" * 40)
-    logger.info("  AI Telegram Bot — Starting")
+    logger.info("  Agent Telegram Bot — Starting")
     logger.info("=" * 40)
+
+    # Validate required config
+    tg_cfg = config.get("telegram", {})
+    if not tg_cfg.get("bot_token"):
+        logger.error("TELEGRAM_BOT_TOKEN not set. Cannot start.")
+        sys.exit(1)
+
+    owner_id = tg_cfg.get("owner_id", 0)
+    if not owner_id:
+        logger.warning("OWNER_ID not set — bot will reject all messages (owner-only mode).")
+    else:
+        logger.info("Owner ID: %d", owner_id)
 
     # Load the LLM
     logger.info("Loading AI model (first run downloads it)...")
     brain = Brain(config)
     brain.initialize()
-    logger.info("Model ready.")
+    logger.info("Model ready on %s.", brain.device)
 
     # Initialize Arena client
     arena = ArenaClient(config)
     if arena.configured:
-        logger.info("Arena client configured (handle: %s)", arena.handle)
+        logger.info("Arena configured (handle: %s, agent: %s)", arena.handle, arena.agent_id)
     else:
         logger.warning("Arena credentials not set — Arena features disabled.")
 
-    # Start the Telegram bot
+    # Start the Telegram bot (blocking — handles SIGTERM from Railway)
     bot = TelegramBot(brain, config, arena=arena)
     bot.run()
 
