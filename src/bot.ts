@@ -73,29 +73,22 @@ export function createBot(): Bot {
 
   // --- File uploads from user ---
   bot.on("message:document", async (ctx) => {
-    try {
-      await ctx.replyWithChatAction("typing");
-      const file = ctx.message.document;
-      const tgFile = await ctx.getFile();
-      const filePath = tgFile.file_path;
-      if (!filePath) {
-        await ctx.reply("Couldn't get file path.");
-        return;
-      }
+    await handleMediaUpload(ctx, "document");
+  });
 
-      fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-      const dest = path.join(UPLOAD_DIR, file.file_name ?? `upload_${Date.now()}`);
+  // --- Photo uploads ---
+  bot.on("message:photo", async (ctx) => {
+    await handleMediaUpload(ctx, "photo");
+  });
 
-      const url = `https://api.telegram.org/file/bot${config.telegramToken}/${filePath}`;
-      const res = await fetch(url);
-      const buffer = Buffer.from(await res.arrayBuffer());
-      fs.writeFileSync(dest, buffer);
+  // --- Voice messages ---
+  bot.on("message:voice", async (ctx) => {
+    await handleMediaUpload(ctx, "voice");
+  });
 
-      const sizeKB = (buffer.length / 1024).toFixed(1);
-      await sendSafe(ctx, `File saved: \`${dest}\`\nSize: ${sizeKB} KB`);
-    } catch (e: any) {
-      await ctx.reply(`Upload failed: ${e.message}`);
-    }
+  // --- Video messages ---
+  bot.on("message:video", async (ctx) => {
+    await handleMediaUpload(ctx, "video");
   });
 
   // --- /sendfile command ---
@@ -207,6 +200,45 @@ export async function setupBot(bot: Bot) {
   });
   cronSkill.startCronScheduler();
   console.log("Schedulers started.");
+}
+
+/** Handle media uploads (documents, photos, voice, video). */
+async function handleMediaUpload(ctx: any, type: string) {
+  try {
+    await ctx.replyWithChatAction("typing");
+    const tgFile = await ctx.getFile();
+    const filePath = tgFile.file_path;
+    if (!filePath) {
+      await ctx.reply("Couldn't get file path.");
+      return;
+    }
+
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+    let filename: string;
+    if (type === "document") {
+      filename = ctx.message.document?.file_name ?? `doc_${Date.now()}`;
+    } else if (type === "photo") {
+      filename = `photo_${Date.now()}.jpg`;
+    } else if (type === "voice") {
+      filename = `voice_${Date.now()}.ogg`;
+    } else if (type === "video") {
+      filename = `video_${Date.now()}.mp4`;
+    } else {
+      filename = `file_${Date.now()}`;
+    }
+
+    const dest = path.join(UPLOAD_DIR, filename);
+    const url = `https://api.telegram.org/file/bot${config.telegramToken}/${filePath}`;
+    const res = await fetch(url);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    fs.writeFileSync(dest, buffer);
+
+    const sizeKB = (buffer.length / 1024).toFixed(1);
+    await sendSafe(ctx, `${type.charAt(0).toUpperCase() + type.slice(1)} saved: \`${dest}\`\nSize: ${sizeKB} KB`);
+  } catch (e: any) {
+    await ctx.reply(`Upload failed: ${e.message}`);
+  }
 }
 
 /** Send a message, splitting if too long. */
