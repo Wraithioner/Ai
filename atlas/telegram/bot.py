@@ -8,7 +8,9 @@ import asyncio
 import html
 import logging
 import re
+import time
 import traceback
+from collections import defaultdict
 
 from telegram import BotCommand, Update
 from telegram.constants import ParseMode
@@ -71,11 +73,29 @@ class TelegramBot:
         self.bot_token = tg_cfg.get("bot_token", "")
         self.owner_id = tg_cfg.get("owner_id", 0)
 
+        safety_cfg = config.get("safety", {})
+        self._rate_limit = safety_cfg.get("max_messages_per_minute", 15) if safety_cfg.get("enabled", True) else 0
+        self._msg_timestamps: defaultdict[int, list[float]] = defaultdict(list)
+
     def _is_owner(self, update: Update) -> bool:
         """Check if the message is from the owner. Silently reject everyone else."""
         if not update.effective_user:
             return False
         return bool(self.owner_id and update.effective_user.id == self.owner_id)
+
+    def _is_rate_limited(self, user_id: int) -> bool:
+        """Check if a user has exceeded the per-minute message rate limit."""
+        if not self._rate_limit:
+            return False
+        now = time.monotonic()
+        timestamps = self._msg_timestamps[user_id]
+        # Prune timestamps older than 60 seconds
+        cutoff = now - 60
+        self._msg_timestamps[user_id] = [t for t in timestamps if t > cutoff]
+        if len(self._msg_timestamps[user_id]) >= self._rate_limit:
+            return True
+        self._msg_timestamps[user_id].append(now)
+        return False
 
     # ================================================================
     # PUBLIC COMMANDS (owner-gated)
@@ -305,6 +325,10 @@ class TelegramBot:
         if not text:
             return
 
+        if self._is_rate_limited(update.effective_user.id):
+            await update.message.reply_text("Slow down — too many messages. Try again in a moment.")
+            return
+
         # Show typing while generating
         await update.message.chat.send_action("typing")
 
@@ -506,7 +530,7 @@ class TelegramBot:
                         name = c.get("name", "?")
                         cid = c.get("id", "?")
                         members = c.get("membersCount", "?")
-                        lines.append(f"{escape(str(name))} (id: <code>{escape(str(cid))}</code>, members: {members})")
+                        lines.append(f"{escape(str(name))} (id: <code>{escape(str(cid))}</code>, members: {escape(str(members))})")
                     else:
                         lines.append(escape(str(c))[:100])
             else:
@@ -584,7 +608,7 @@ class TelegramBot:
         """Create a post. Usage: /post <content>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         text = self._extract_args(update, "/post")
@@ -602,7 +626,7 @@ class TelegramBot:
         """Reply to a thread. Usage: /reply <thread_id> <content>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         parts = self._extract_args(update, "/reply")
@@ -621,7 +645,7 @@ class TelegramBot:
         """Delete a post. Usage: /delete_post <thread_id>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         thread_id = self._extract_args(update, "/delete_post")
@@ -639,7 +663,7 @@ class TelegramBot:
         """Like a thread. Usage: /like <thread_id>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         thread_id = self._extract_args(update, "/like")
@@ -657,7 +681,7 @@ class TelegramBot:
         """Repost a thread. Usage: /repost <thread_id>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         thread_id = self._extract_args(update, "/repost")
@@ -675,7 +699,7 @@ class TelegramBot:
         """Quote-repost. Usage: /quote <thread_id> <content>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         parts = self._extract_args(update, "/quote")
@@ -698,7 +722,7 @@ class TelegramBot:
         """View your Arena feed."""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         feed = await asyncio.to_thread(self.arena.get_my_feed)
@@ -708,7 +732,7 @@ class TelegramBot:
         """View trending feed."""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         feed = await asyncio.to_thread(self.arena.get_trending_feed)
@@ -718,7 +742,7 @@ class TelegramBot:
         """View a user's posts. Usage: /userfeed <handle>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         handle = self._extract_args(update, "/userfeed")
@@ -737,7 +761,7 @@ class TelegramBot:
         """Follow a user. Usage: /follow <user_id>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         user_id = self._extract_args(update, "/follow")
@@ -755,7 +779,7 @@ class TelegramBot:
         """Unfollow a user. Usage: /unfollow <user_id>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         user_id = self._extract_args(update, "/unfollow")
@@ -773,7 +797,7 @@ class TelegramBot:
         """View your followers."""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         data = await asyncio.to_thread(self.arena.get_followers)
@@ -783,7 +807,7 @@ class TelegramBot:
         """View who you follow."""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         data = await asyncio.to_thread(self.arena.get_following)
@@ -793,7 +817,7 @@ class TelegramBot:
         """Search users. Usage: /search <query>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         query = self._extract_args(update, "/search")
@@ -812,7 +836,7 @@ class TelegramBot:
         """View your Arena profile."""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         profile = await asyncio.to_thread(self.arena.get_me)
@@ -834,7 +858,7 @@ class TelegramBot:
         """View a user's profile. Usage: /profile <handle>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         handle = self._extract_args(update, "/profile")
@@ -861,7 +885,7 @@ class TelegramBot:
         """Update your bio. Usage: /bio <text>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         bio_text = self._extract_args(update, "/bio")
@@ -883,7 +907,7 @@ class TelegramBot:
         """View share/token stats."""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         stats = await asyncio.to_thread(self.arena.get_share_stats)
@@ -904,7 +928,7 @@ class TelegramBot:
         """View your holdings."""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         data = await asyncio.to_thread(self.arena.get_holdings)
@@ -933,7 +957,7 @@ class TelegramBot:
         """View earnings breakdown."""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         data = await asyncio.to_thread(self.arena.get_earnings)
@@ -954,7 +978,7 @@ class TelegramBot:
         """View who holds your shares."""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         data = await asyncio.to_thread(self.arena.get_share_holders)
@@ -968,7 +992,7 @@ class TelegramBot:
         """View recent notifications."""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         data = await asyncio.to_thread(self.arena.get_notifications)
@@ -998,7 +1022,7 @@ class TelegramBot:
         """Mark all notifications as seen."""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         result = await asyncio.to_thread(self.arena.mark_notifications_seen)
@@ -1015,7 +1039,7 @@ class TelegramBot:
         """List your Arena chat conversations."""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         data = await asyncio.to_thread(self.arena.get_conversations)
@@ -1041,7 +1065,7 @@ class TelegramBot:
         """Send a DM. Usage: /dm <user_id> <message>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         parts = self._extract_args(update, "/dm")
@@ -1076,7 +1100,7 @@ class TelegramBot:
         """View top communities."""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         data = await asyncio.to_thread(self.arena.get_top_communities)
@@ -1091,7 +1115,7 @@ class TelegramBot:
                     name = c.get("name", "?")
                     cid = c.get("id", "?")
                     members = c.get("membersCount", "?")
-                    lines.append(f"{escape(str(name))} (id: <code>{escape(str(cid))}</code>, members: {members})")
+                    lines.append(f"{escape(str(name))} (id: <code>{escape(str(cid))}</code>, members: {escape(str(members))})")
                 else:
                     lines.append(escape(str(c))[:100])
         else:
@@ -1103,7 +1127,7 @@ class TelegramBot:
         """Search communities. Usage: /search_community <query>"""
         if not self._is_owner(update):
             return
-        if not self._require_arena(update):
+        if not await self._require_arena(update):
             return
 
         query = self._extract_args(update, "/search_community")
@@ -1135,26 +1159,19 @@ class TelegramBot:
     # ================================================================
 
     def _extract_args(self, update: Update, command: str) -> str:
-        """Extract arguments after the command name."""
+        """Extract arguments after the command name, handling @botname suffix."""
         if not update.message or not update.message.text:
             return ""
-        # Handle both /command and /command@botname
         text = update.message.text
-        if text.startswith(command):
-            return text[len(command):].strip()
-        # Try with @botname suffix
+        # Split on first whitespace: ["/command@botname", "args..."]
         parts = text.split(None, 1)
         return parts[1].strip() if len(parts) > 1 else ""
 
-    def _require_arena(self, update: Update) -> bool:
+    async def _require_arena(self, update: Update) -> bool:
         """Check if Arena is configured. Sends error message if not."""
         if self.arena and self.arena.configured:
             return True
-        # Can't await here — but this is always called from an async handler
-        # so we use a fire-and-forget approach
-        asyncio.ensure_future(
-            update.message.reply_text("Arena not configured. Set ARENA_API_KEY and ARENA_AGENT_ID.")
-        )
+        await update.message.reply_text("Arena not configured. Set ARENA_API_KEY and ARENA_AGENT_ID.")
         return False
 
     async def _display_feed(self, update: Update, feed, title: str):
@@ -1231,23 +1248,23 @@ class TelegramBot:
         logger.error("Exception while handling an update:", exc_info=context.error)
 
         tb = traceback.format_exception(type(context.error), context.error, context.error.__traceback__)
-        tb_text = "".join(tb)[-3000:]  # last 3000 chars
+        tb_text = "".join(tb)
 
         # Try to notify the owner
         if self.owner_id and context.bot:
             try:
-                msg = (
-                    f"<b>Bot Error</b>\n\n"
-                    f"<pre>{escape(tb_text)}</pre>"
-                )
-                # Truncate to Telegram limit
-                if len(msg) > TG_MSG_LIMIT:
-                    msg = msg[:TG_MSG_LIMIT - 10] + "</pre>"
-                await context.bot.send_message(
-                    chat_id=self.owner_id,
-                    text=msg,
-                    parse_mode=ParseMode.HTML,
-                )
+                escaped_tb = escape(tb_text)
+                msg = f"<b>Bot Error</b>\n\n<pre>{escaped_tb}</pre>"
+                if len(msg) <= TG_MSG_LIMIT:
+                    await context.bot.send_message(
+                        chat_id=self.owner_id, text=msg, parse_mode=ParseMode.HTML,
+                    )
+                else:
+                    # Too long for HTML — send as plain text truncated safely
+                    plain = f"Bot Error\n\n{tb_text}"
+                    await context.bot.send_message(
+                        chat_id=self.owner_id, text=plain[:TG_MSG_LIMIT],
+                    )
             except Exception:
                 logger.error("Failed to send error notification to owner.")
 

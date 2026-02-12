@@ -40,6 +40,7 @@ class ArenaClient:
         self._session.headers.update({
             "X-API-Key": self.api_key,
             "Content-Type": "application/json",
+            "User-Agent": "AtlasBot/1.0",
         })
 
     @property
@@ -72,6 +73,7 @@ class ArenaClient:
 
                 # Server errors — retry
                 if resp.status_code >= 500:
+                    last_error = f"HTTP {resp.status_code}"
                     if attempt < MAX_RETRIES:
                         wait = RETRY_BACKOFF[attempt] if attempt < len(RETRY_BACKOFF) else 10
                         logger.warning(
@@ -80,8 +82,19 @@ class ArenaClient:
                         )
                         time.sleep(wait)
                         continue
+                    break
 
-                data = resp.json()
+                # Client errors (4xx except 429) — don't retry
+                if resp.status_code >= 400:
+                    logger.warning("Arena HTTP %d on %s %s", resp.status_code, method, path)
+                    return None
+
+                try:
+                    data = resp.json()
+                except (ValueError, requests.exceptions.JSONDecodeError):
+                    logger.error("Arena non-JSON response on %s %s (HTTP %d)", method, path, resp.status_code)
+                    return None
+
                 if not data.get("success"):
                     error = data.get("error", "Unknown error")
                     hint = data.get("hint", "")

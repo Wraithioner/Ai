@@ -1,10 +1,7 @@
 """LLM brain - runs a language model directly in Python. No external servers needed."""
 
 import gc
-import json
 import logging
-import re
-import time
 from collections import OrderedDict
 from pathlib import Path
 
@@ -74,6 +71,9 @@ class Brain:
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_source, cache_dir=cache_dir, trust_remote_code=False,
         )
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_source, cache_dir=cache_dir,
             torch_dtype=dtype, device_map=device_map,
@@ -100,14 +100,6 @@ class Brain:
 
         self._conversations[user_id] = []
         return self._conversations[user_id]
-
-    def _build_messages(self, user_id: int) -> list[dict]:
-        """Build the message list with system prompt and trimmed history."""
-        messages = [{"role": "system", "content": self.system_prompt}]
-        conversation = self._get_conversation(user_id)
-        trimmed = conversation[-(self.max_context * 2):]
-        messages.extend(trimmed)
-        return messages
 
     def _generate(self, messages: list[dict], max_new_tokens: int | None = None) -> str:
         """Run inference on a list of chat messages."""
@@ -144,6 +136,8 @@ class Brain:
         # Free intermediate tensors
         del inputs, outputs
         gc.collect()
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
 
         return reply
 
@@ -162,15 +156,19 @@ class Brain:
         if len(conversation) > max_entries:
             del conversation[:len(conversation) - max_entries]
 
-        messages = self._build_messages(user_id)
+        messages = [{"role": "system", "content": self.system_prompt}]
+        messages.extend(conversation[-(max_entries):])
 
         try:
             reply = self._generate(messages)
             if not reply:
                 reply = "I'm not sure how to respond to that."
         except Exception as e:
-            reply = "Something went wrong while thinking."
             logger.error("Inference error: %s", e)
+            # Remove the user message so errors don't pollute context
+            if conversation and conversation[-1].get("role") == "user":
+                conversation.pop()
+            return "Something went wrong while thinking."
 
         conversation.append({"role": "assistant", "content": reply})
         return reply

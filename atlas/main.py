@@ -38,6 +38,11 @@ def main():
     else:
         logger.info("Owner ID: %d", owner_id)
 
+    # Validate model config
+    if not config.get("llm", {}).get("model"):
+        logger.error("No model specified. Set MODEL_NAME env var or llm.model in settings.yaml.")
+        sys.exit(1)
+
     # Load the LLM
     logger.info("Loading AI model (first run downloads it)...")
     brain = Brain(config)

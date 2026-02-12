@@ -1,10 +1,13 @@
 """Configuration loader with environment variable overrides for Railway."""
 
+import logging
 import os
 import sys
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 # Project root is two levels up from this file (atlas/core/config.py -> Ai/)
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -68,10 +71,16 @@ def load_config(config_path: str | None = None) -> dict:
         config["telegram"]["bot_token"] = os.environ["TELEGRAM_BOT_TOKEN"]
 
     if os.environ.get("OWNER_ID"):
-        config["telegram"]["owner_id"] = int(os.environ["OWNER_ID"])
+        try:
+            config["telegram"]["owner_id"] = int(os.environ["OWNER_ID"])
+        except ValueError:
+            logger.warning("Invalid OWNER_ID env var (not an integer), ignoring.")
 
     if os.environ.get("MAX_USERS"):
-        config["telegram"]["max_users"] = int(os.environ["MAX_USERS"])
+        try:
+            config["telegram"]["max_users"] = int(os.environ["MAX_USERS"])
+        except ValueError:
+            logger.warning("Invalid MAX_USERS env var (not an integer), ignoring.")
 
     # --- LLM ---
     if os.environ.get("MODEL_NAME"):
@@ -81,13 +90,22 @@ def load_config(config_path: str | None = None) -> dict:
         config["llm"]["system_prompt"] = os.environ["SYSTEM_PROMPT"]
 
     if os.environ.get("MAX_TOKENS"):
-        config["llm"]["max_tokens"] = int(os.environ["MAX_TOKENS"])
+        try:
+            config["llm"]["max_tokens"] = int(os.environ["MAX_TOKENS"])
+        except ValueError:
+            logger.warning("Invalid MAX_TOKENS env var (not an integer), ignoring.")
 
     if os.environ.get("TEMPERATURE"):
-        config["llm"]["temperature"] = float(os.environ["TEMPERATURE"])
+        try:
+            config["llm"]["temperature"] = float(os.environ["TEMPERATURE"])
+        except ValueError:
+            logger.warning("Invalid TEMPERATURE env var (not a number), ignoring.")
 
     if os.environ.get("CONTEXT_WINDOW"):
-        config["llm"]["context_window"] = int(os.environ["CONTEXT_WINDOW"])
+        try:
+            config["llm"]["context_window"] = int(os.environ["CONTEXT_WINDOW"])
+        except ValueError:
+            logger.warning("Invalid CONTEXT_WINDOW env var (not an integer), ignoring.")
 
     # --- Arena ---
     if os.environ.get("ARENA_API_KEY"):

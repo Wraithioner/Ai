@@ -1,7 +1,7 @@
 """Fine-tune Atlas's brain with your own training data.
 
 Usage:
-    python -m atlas.main --train
+    python -m atlas.training.train
 
 This will:
 1. Load the base model
@@ -136,12 +136,15 @@ def run_training(config_path: str | None = None):
     formatted_texts = format_for_training(examples, tokenizer)
 
     # Tokenize each example individually (variable lengths are fine).
-    # DataCollatorForLanguageModeling handles per-batch padding,
-    # avoiding wasteful global padding to max_length.
+    # DataCollatorForLanguageModeling handles per-batch padding and label
+    # creation, so we only need to provide input_ids and attention_mask.
     tokenized = []
     for text in formatted_texts:
         enc = tokenizer(text, truncation=True, max_length=512)
-        tokenized.append(enc)
+        tokenized.append({
+            "input_ids": enc["input_ids"],
+            "attention_mask": enc["attention_mask"],
+        })
 
     class SimpleDataset(torch.utils.data.Dataset):
         def __init__(self, examples):
@@ -151,14 +154,7 @@ def run_training(config_path: str | None = None):
             return len(self.examples)
 
         def __getitem__(self, idx):
-            item = self.examples[idx]
-            input_ids = torch.tensor(item["input_ids"], dtype=torch.long)
-            attention_mask = torch.tensor(item["attention_mask"], dtype=torch.long)
-            return {
-                "input_ids": input_ids,
-                "attention_mask": attention_mask,
-                "labels": input_ids.clone(),
-            }
+            return self.examples[idx]
 
     dataset = SimpleDataset(tokenized)
     print(f"  Prepared {len(dataset)} training samples.")
@@ -199,4 +195,4 @@ def run_training(config_path: str | None = None):
 
     print(f"\nAtlas's brain saved to: {output_dir}")
     print("\nDone! Atlas will now use your fine-tuned brain.")
-    print("Start Atlas with: python -m atlas.main --text-mode")
+    print("Start Atlas with: python -m atlas.main")
