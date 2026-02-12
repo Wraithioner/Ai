@@ -87,7 +87,8 @@ def execute_agent_action(action: dict, computer: Computer, eyes: Eyes) -> bool:
 
     elif action_type == "scroll":
         direction = action.get("value", "down")
-        computer.scroll(3 if direction == "down" else -3)
+        # pyautogui: positive=UP, negative=DOWN
+        computer.scroll(-3 if direction == "down" else 3)
 
     else:
         logger.warning("Unknown action type: %s", action_type)

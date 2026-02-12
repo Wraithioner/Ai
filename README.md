@@ -43,7 +43,7 @@ python -m atlas.main --text-mode
 python -m atlas.main --train
 ```
 
-Or install manually: `pip install transformers accelerate huggingface-hub torch numpy pyyaml`
+Or install manually: `pip install -r requirements.txt`
 
 ## Project Structure
 
@@ -53,11 +53,15 @@ Ai/
 │   ├── core/                   # Core components
 │   │   ├── brain.py            #   LLM engine (runs model directly)
 │   │   ├── ears.py             #   Speech-to-text (Whisper + VAD)
-│   │   ├── voice.py            #   Text-to-speech (Piper)
+│   │   ├── voice.py            #   Text-to-speech (Piper / Windows SAPI)
+│   │   ├── eyes.py             #   Screen reading via OCR (EasyOCR)
+│   │   ├── actions.py          #   Command parsing & system actions
+│   │   ├── computer.py         #   Mouse & keyboard control (pyautogui)
+│   │   ├── safety.py           #   Safety guardrails & rate limiting
 │   │   └── config.py           #   Configuration & path management
 │   ├── training/               # Fine-tuning tools
 │   │   └── train.py            #   Training script
-│   └── main.py                 # Entry point
+│   └── main.py                 # Entry point & agent orchestration
 ├── config/
 │   └── settings.yaml           # All settings in one place
 ├── data/

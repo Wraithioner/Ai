@@ -69,10 +69,8 @@ wake_word:
 
 # --- Audio Settings ---
 audio:
-  # Sample rate for recording
+  # Sample rate for recording (16000 required for Silero VAD)
   sample_rate: 16000
-  # Audio chunk size
-  chunk_size: 1024
   # Input device index (null = default microphone)
   input_device: null
   # Output device index (null = default speaker)

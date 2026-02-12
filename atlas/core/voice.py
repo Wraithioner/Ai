@@ -36,6 +36,7 @@ class Voice:
 
     Both Piper and SAPI support async speech with interrupt capability.
     Piper async runs synthesis + playback in a background thread.
+    Uses a persistent PyAudio output stream to avoid open/close overhead per speech.
     """
 
     def __init__(self, config: dict):
@@ -53,6 +54,10 @@ class Voice:
         self._sapi_speaker = None
         self._speech_thread = None
         self._lock = threading.Lock()
+        # Persistent PyAudio output (initialized on first Piper speak)
+        self._pa = None
+        self._out_stream = None
+        self._piper_sample_rate = 22050  # Updated from voice config JSON
 
     def initialize(self):
         """Set up TTS engine. Tries Piper first, falls back to Windows SAPI."""
@@ -87,6 +92,9 @@ class Voice:
 
         if not self.model_path.exists():
             self._download_voice()
+
+        # Read sample rate from the Piper voice config JSON
+        self._piper_sample_rate = self._read_piper_sample_rate()
 
         return True
 
@@ -138,6 +146,59 @@ class Voice:
                 for chunk in resp.iter_content(chunk_size=8192):
                     f.write(chunk)
         logger.info("Voice model downloaded to %s", self.model_path)
+
+    def _read_piper_sample_rate(self) -> int:
+        """Read the sample rate from the Piper voice config JSON."""
+        import json
+        try:
+            if self.config_path and self.config_path.exists():
+                with open(self.config_path) as f:
+                    voice_cfg = json.load(f)
+                rate = voice_cfg.get("audio", {}).get("sample_rate", 22050)
+                logger.info("Piper voice sample rate: %d Hz", rate)
+                return rate
+        except Exception as e:
+            logger.debug("Could not read Piper config, using 22050 Hz: %s", e)
+        return 22050
+
+    def _get_output_stream(self):
+        """Get or create a persistent PyAudio output stream for Piper playback."""
+        import pyaudio
+
+        if self._out_stream is not None:
+            try:
+                if self._out_stream.is_active() or not self._out_stream.is_stopped():
+                    return self._out_stream
+            except Exception:
+                pass
+            # Stream is dead, recreate
+            self._close_output_stream()
+
+        self._pa = pyaudio.PyAudio()
+        self._out_stream = self._pa.open(
+            format=self._pa.get_format_from_width(2),
+            channels=1,
+            rate=self._piper_sample_rate,
+            output=True,
+            output_device_index=self.output_device,
+        )
+        return self._out_stream
+
+    def _close_output_stream(self):
+        """Close the persistent output stream."""
+        if self._out_stream is not None:
+            try:
+                self._out_stream.stop_stream()
+                self._out_stream.close()
+            except Exception:
+                pass
+            self._out_stream = None
+        if self._pa is not None:
+            try:
+                self._pa.terminate()
+            except Exception:
+                pass
+            self._pa = None
 
     def speak(self, text: str):
         """Convert text to speech and play it through the speakers (blocks)."""
@@ -222,6 +283,7 @@ class Voice:
         except subprocess.TimeoutExpired:
             logger.warning("Speech generation timed out.")
             piper_proc.kill()
+            piper_proc.wait()  # Reap zombie process
             return None
 
     def _speak_sapi(self, text: str):
@@ -304,48 +366,18 @@ class Voice:
         logger.info("Speech interrupted.")
 
     def _play_raw_audio(self, raw_audio: bytes):
-        """Play raw PCM audio data using PyAudio (blocking, no interrupt check)."""
-        import pyaudio
-
-        pa = pyaudio.PyAudio()
-        stream = pa.open(
-            format=pa.get_format_from_width(2),
-            channels=1,
-            rate=22050,
-            output=True,
-            output_device_index=self.output_device,
-        )
-
-        try:
-            chunk_size = 4096
-            for i in range(0, len(raw_audio), chunk_size):
-                stream.write(raw_audio[i:i + chunk_size])
-        finally:
-            stream.stop_stream()
-            stream.close()
-            pa.terminate()
+        """Play raw PCM audio using the persistent output stream (blocking)."""
+        stream = self._get_output_stream()
+        chunk_size = 4096
+        for i in range(0, len(raw_audio), chunk_size):
+            stream.write(raw_audio[i:i + chunk_size])
 
     def _play_raw_audio_interruptible(self, raw_audio: bytes):
         """Play raw PCM audio in chunks, checking for stop requests between chunks."""
-        import pyaudio
-
-        pa = pyaudio.PyAudio()
-        stream = pa.open(
-            format=pa.get_format_from_width(2),
-            channels=1,
-            rate=22050,
-            output=True,
-            output_device_index=self.output_device,
-        )
-
-        try:
-            chunk_size = 4096
-            for i in range(0, len(raw_audio), chunk_size):
-                if self._stop_requested:
-                    logger.info("Piper speech interrupted during playback.")
-                    break
-                stream.write(raw_audio[i:i + chunk_size])
-        finally:
-            stream.stop_stream()
-            stream.close()
-            pa.terminate()
+        stream = self._get_output_stream()
+        chunk_size = 4096
+        for i in range(0, len(raw_audio), chunk_size):
+            if self._stop_requested:
+                logger.info("Piper speech interrupted during playback.")
+                break
+            stream.write(raw_audio[i:i + chunk_size])

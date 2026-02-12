@@ -147,15 +147,18 @@ class Brain:
 
         input_len = inputs["input_ids"].shape[1]
 
+        # temperature=0 requires do_sample=False (greedy decoding)
+        use_sampling = self.temperature > 0
+        gen_kwargs = dict(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            pad_token_id=self.tokenizer.eos_token_id,
+        )
+        if use_sampling:
+            gen_kwargs.update(temperature=self.temperature, do_sample=True, top_p=0.9)
+
         with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                temperature=self.temperature,
-                do_sample=True,
-                top_p=0.9,
-                pad_token_id=self.tokenizer.eos_token_id,
-            )
+            outputs = self.model.generate(**gen_kwargs)
 
         new_tokens = outputs[0][input_len:]
         return self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()

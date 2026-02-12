@@ -130,8 +130,8 @@ class Eyes:
                 "confidence": confidence,
             })
 
-        # Cache results for this agent step
-        if image is None or self._cached_results is None:
+        # Only cache results from screen captures (not external images)
+        if image is None:
             self._cached_results = parsed
 
         return parsed

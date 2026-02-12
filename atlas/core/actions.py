@@ -262,7 +262,10 @@ class Actions:
             if self.is_windows:
                 os.startfile(cmd)
             else:
-                subprocess.Popen([cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.Popen(
+                    [cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
             logger.info("Opened app: %s (%s)", name, cmd)
             return True, f"Opening {name}."
         except Exception as e:
@@ -285,7 +288,10 @@ class Actions:
             if self.is_windows:
                 os.startfile(target)
             else:
-                subprocess.Popen(["xdg-open", target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.Popen(
+                    ["xdg-open", target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
             logger.info("Opened: %s", target)
             return True, f"Opening {target}."
         except Exception as e:

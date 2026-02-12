@@ -135,30 +135,32 @@ def run_training(config_path: str | None = None):
     print("\n[3/4] Preparing training data...")
     formatted_texts = format_for_training(examples, tokenizer)
 
-    # Tokenize (no padding needed since batch_size=1)
-    encodings = tokenizer(
-        formatted_texts,
-        truncation=True,
-        padding=False,
-        max_length=512,
-        return_tensors="pt",
-    )
+    # Tokenize each example individually (variable lengths are fine).
+    # DataCollatorForLanguageModeling handles per-batch padding,
+    # avoiding wasteful global padding to max_length.
+    tokenized = []
+    for text in formatted_texts:
+        enc = tokenizer(text, truncation=True, max_length=512)
+        tokenized.append(enc)
 
     class SimpleDataset(torch.utils.data.Dataset):
-        def __init__(self, encodings):
-            self.encodings = encodings
+        def __init__(self, examples):
+            self.examples = examples
 
         def __len__(self):
-            return self.encodings["input_ids"].shape[0]
+            return len(self.examples)
 
         def __getitem__(self, idx):
+            item = self.examples[idx]
+            input_ids = torch.tensor(item["input_ids"], dtype=torch.long)
+            attention_mask = torch.tensor(item["attention_mask"], dtype=torch.long)
             return {
-                "input_ids": self.encodings["input_ids"][idx],
-                "attention_mask": self.encodings["attention_mask"][idx],
-                "labels": self.encodings["input_ids"][idx].clone(),
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "labels": input_ids.clone(),
             }
 
-    dataset = SimpleDataset(encodings)
+    dataset = SimpleDataset(tokenized)
     print(f"  Prepared {len(dataset)} training samples.")
 
     # Step 4: Train
