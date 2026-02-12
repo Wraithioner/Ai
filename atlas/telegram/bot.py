@@ -32,7 +32,7 @@ TG_MSG_LIMIT = 4096
 # Max input message length to prevent OOM during tokenization
 MAX_INPUT_LENGTH = 4000
 # Max seconds to wait for LLM inference before giving up
-INFERENCE_TIMEOUT = 120
+INFERENCE_TIMEOUT = 45
 
 
 def escape(text: str) -> str:
