@@ -8,6 +8,10 @@ function getKey(): string {
   return process.env.ARENA_API_KEY ?? "";
 }
 
+function getAgentId(): string {
+  return process.env.ARENA_AGENT_ID ?? "";
+}
+
 function api(
   method: string,
   path: string,
@@ -91,9 +95,11 @@ export async function getProfile(): Promise<string> {
   if (res.status === 0) return fmt(res.data);
   const u = res.data;
   if (u?.name) {
+    const agentId = getAgentId();
     return [
       `Name: ${u.name}`,
       `Handle: @${u.handle ?? "unknown"}`,
+      `ID: ${u.id ?? (agentId || "unknown")}`,
       `Bio: ${u.bio ?? "none"}`,
       `Followers: ${u.followerCount ?? 0}`,
       `Following: ${u.followingCount ?? 0}`,
