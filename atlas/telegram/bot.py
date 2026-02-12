@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 # Telegram message limit
 TG_MSG_LIMIT = 4096
+# Max input message length to prevent OOM during tokenization
+MAX_INPUT_LENGTH = 4000
 
 
 def escape(text: str) -> str:
@@ -336,6 +338,12 @@ class TelegramBot:
             await update.message.reply_text("Slow down — too many messages. Try again in a moment.")
             return
 
+        if len(text) > MAX_INPUT_LENGTH:
+            await update.message.reply_text(
+                f"Message too long ({len(text)} chars). Please keep it under {MAX_INPUT_LENGTH}."
+            )
+            return
+
         # Show typing while generating
         await update.message.chat.send_action("typing")
 
@@ -582,7 +590,9 @@ class TelegramBot:
         prompt = (
             f"Write a short post for Arena (social media) about: {clean_topic}\n\n"
             "Rules: No hashtags. No bold. No emojis. No markdown. "
-            "Keep it under 280 characters. Just clean, natural text."
+            "Keep it under 280 characters. Just clean, natural text.\n"
+            "Ethical rules: Do not write anything promoting alcohol, gambling, "
+            "explicit content, fraud, or anything haram. Keep it halal and beneficial."
         )
 
         try:
