@@ -16,6 +16,7 @@ import { evalJS } from "./skills/eval.js";
 import * as status from "./skills/status.js";
 import * as history from "./skills/history.js";
 import { safeEnvValue, listSafeEnvVars, codeBlock } from "./utils/sanitize.js";
+import * as arena from "./skills/arena.js";
 
 const HELP = `${persona.name} — your personal agent. Here's everything:
 
@@ -79,6 +80,39 @@ TOOLS
 /aliases — List aliases
 /rmalias <name> — Remove alias
 /sendfile <path> — Send file to chat
+
+ARENA
+/arena post <text> — Post to Arena
+/arena reply <id> <text> — Reply to post
+/arena quote <id> <text> — Quote post
+/arena like <id> — Like a post
+/arena unlike <id> — Unlike a post
+/arena repost <id> — Repost
+/arena search <query> — Search users
+/arena user <handle> — View profile
+/arena trending — Trending users
+/arena follow <handle> — Follow user
+/arena unfollow <handle> — Unfollow user
+/arena followers <handle> — List followers
+/arena dm <convId> <msg> — Send DM
+/arena convos — List conversations
+/arena react <msgId> <emoji> — React to message
+/arena stage <title> — Create audio room
+/arena live <title> — Create livestream
+/arena stages — Active stages
+/arena lives — Active livestreams
+/arena shares [handle] — Share stats
+/arena holdings — Your holdings
+/arena earnings — Earnings breakdown
+/arena communities — Top communities
+/arena csearch <query> — Search communities
+/arena join <id> — Join community
+/arena notifs — Notifications
+/arena unseen — Unseen notifications
+/arena seen — Mark all as seen
+/arena profile — Your profile
+/arena update <name|bio> <value> — Update profile
+/arena register <name> <handle> <bio> — Register agent
 
 META
 /status — Dashboard
@@ -277,6 +311,117 @@ export async function route(text: string, user = "unknown"): Promise<string> {
       return alias.listAliases();
     case "/rmalias":
       return args ? alias.removeAlias(args.trim()) : "Usage: `/rmalias <name>`";
+
+    // --- Arena ---
+    case "/arena": {
+      const sub = args.split(/\s+/);
+      const subcmd = sub[0]?.toLowerCase();
+      const subargs = args.slice((sub[0]?.length ?? 0)).trim();
+      switch (subcmd) {
+        // Posts
+        case "post":
+          return subargs ? arena.createPost(subargs) : "Usage: /arena post <text>";
+        case "reply": {
+          const sp = subargs.split(/\s+/, 2);
+          if (!sp[0] || !sp[1]) return "Usage: /arena reply <postId> <text>";
+          return arena.replyToPost(sp[0], subargs.slice(sp[0].length).trim());
+        }
+        case "quote": {
+          const sp = subargs.split(/\s+/, 2);
+          if (!sp[0] || !sp[1]) return "Usage: /arena quote <postId> <text>";
+          return arena.quotePost(sp[0], subargs.slice(sp[0].length).trim());
+        }
+        case "like":
+          return subargs ? arena.likePost(subargs) : "Usage: /arena like <postId>";
+        case "unlike":
+          return subargs ? arena.unlikePost(subargs) : "Usage: /arena unlike <postId>";
+        case "repost":
+          return subargs ? arena.repost(subargs) : "Usage: /arena repost <postId>";
+
+        // Users
+        case "search":
+          return subargs ? arena.searchUser(subargs) : "Usage: /arena search <query>";
+        case "user":
+          return subargs ? arena.getUserByHandle(subargs) : "Usage: /arena user <handle>";
+        case "trending":
+          return arena.trending(parseInt(subargs) || 1);
+        case "follow":
+          return subargs ? arena.follow(subargs) : "Usage: /arena follow <handle>";
+        case "unfollow":
+          return subargs ? arena.unfollow(subargs) : "Usage: /arena unfollow <handle>";
+        case "followers":
+          return subargs ? arena.getFollowers(subargs) : "Usage: /arena followers <handle>";
+
+        // Chat
+        case "dm": {
+          const sp = subargs.split(/\s+/, 2);
+          if (!sp[0] || !sp[1]) return "Usage: /arena dm <conversationId> <message>";
+          return arena.sendMessage(sp[0], subargs.slice(sp[0].length).trim());
+        }
+        case "convos":
+          return arena.getConversations();
+        case "react": {
+          const sp = subargs.split(/\s+/, 2);
+          if (!sp[0] || !sp[1]) return "Usage: /arena react <messageId> <emoji>";
+          return arena.reactToMessage(sp[0], sp[1]);
+        }
+
+        // Live
+        case "stage":
+          return subargs ? arena.createStage(subargs) : "Usage: /arena stage <title>";
+        case "live":
+          return subargs ? arena.createLivestream(subargs) : "Usage: /arena live <title>";
+        case "stages":
+          return arena.getStages();
+        case "lives":
+          return arena.getLivestreams();
+
+        // Shares
+        case "shares":
+          return arena.shareStats(subargs || undefined);
+        case "holdings":
+          return arena.holdings();
+        case "earnings":
+          return arena.earnings();
+
+        // Communities
+        case "communities":
+          return arena.topCommunities();
+        case "csearch":
+          return subargs ? arena.searchCommunity(subargs) : "Usage: /arena csearch <query>";
+        case "join":
+          return subargs ? arena.joinCommunity(subargs) : "Usage: /arena join <communityId>";
+
+        // Notifications
+        case "notifs":
+          return arena.getNotifications(subargs || undefined);
+        case "unseen":
+          return arena.unseenNotifications();
+        case "seen":
+          return arena.markAllSeen();
+
+        // Profile
+        case "profile":
+          return arena.getProfile();
+        case "update": {
+          const sp = subargs.split(/\s+/, 2);
+          const field = sp[0]?.toLowerCase();
+          const val = subargs.slice((sp[0]?.length ?? 0)).trim();
+          if (!field || !val) return "Usage: /arena update <name|bio> <value>";
+          if (field === "name") return arena.updateProfile(val);
+          if (field === "bio") return arena.updateProfile(undefined, val);
+          return "Fields: name, bio";
+        }
+        case "register": {
+          const sp = subargs.split(/\s+/, 3);
+          if (sp.length < 3) return "Usage: /arena register <name> <handle> <bio>";
+          return arena.registerAgent(sp[0], sp[1], subargs.slice(sp[0].length + sp[1].length + 2).trim());
+        }
+
+        default:
+          return "Arena commands: post, reply, quote, like, unlike, repost, search, user, trending, follow, unfollow, followers, dm, convos, react, stage, live, stages, lives, shares, holdings, earnings, communities, csearch, join, notifs, unseen, seen, profile, update, register";
+      }
+    }
 
     // --- Meta ---
     case "/status":
