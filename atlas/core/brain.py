@@ -78,6 +78,7 @@ class Brain:
             model_source, cache_dir=cache_dir,
             torch_dtype=dtype, device_map=device_map,
             trust_remote_code=False,
+            low_cpu_mem_usage=True,
         )
         self.model.eval()
         logger.info("Model loaded on %s.", self.device)

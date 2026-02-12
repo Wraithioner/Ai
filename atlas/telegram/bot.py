@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 TG_MSG_LIMIT = 4096
 # Max input message length to prevent OOM during tokenization
 MAX_INPUT_LENGTH = 4000
+# Max seconds to wait for LLM inference before giving up
+INFERENCE_TIMEOUT = 120
 
 
 def escape(text: str) -> str:
@@ -105,6 +107,31 @@ class TelegramBot:
             return True
         self._msg_timestamps[user_id].append(now)
         return False
+
+    async def _run_with_typing(self, update: Update, coro):
+        """Run a coroutine while showing a persistent typing indicator.
+
+        Telegram's typing indicator expires after ~5 seconds, but LLM inference
+        can take 30-60+ seconds. This keeps the indicator alive and also enforces
+        a hard timeout so the bot never hangs indefinitely.
+        """
+        async def keep_typing():
+            try:
+                while True:
+                    await update.message.chat.send_action("typing")
+                    await asyncio.sleep(4)
+            except asyncio.CancelledError:
+                pass
+
+        typing_task = asyncio.create_task(keep_typing())
+        try:
+            return await asyncio.wait_for(coro, timeout=INFERENCE_TIMEOUT)
+        finally:
+            typing_task.cancel()
+            try:
+                await typing_task
+            except asyncio.CancelledError:
+                pass
 
     # ================================================================
     # PUBLIC COMMANDS (owner-gated)
@@ -344,9 +371,6 @@ class TelegramBot:
             )
             return
 
-        # Show typing while generating
-        await update.message.chat.send_action("typing")
-
         # Try to detect an Arena intent
         if self.arena and self.arena.configured:
             intent, extra = self._detect_arena_intent(text)
@@ -354,11 +378,16 @@ class TelegramBot:
             if handled:
                 return
 
-        # Regular LLM conversation
+        # Regular LLM conversation (with persistent typing + timeout)
         try:
-            response = await asyncio.to_thread(
-                self.brain.think, text, user_id=self.owner_id
+            response = await self._run_with_typing(
+                update,
+                asyncio.to_thread(self.brain.think, text, user_id=self.owner_id),
             )
+        except asyncio.TimeoutError:
+            logger.warning("Inference timed out after %ds for user %d", INFERENCE_TIMEOUT, self.owner_id)
+            await update.message.reply_text("That took too long. Try a shorter message or /reset.")
+            return
         except Exception as e:
             logger.error("LLM inference error: %s", e)
             await update.message.reply_text("Something went wrong during inference. Check logs.")
@@ -598,11 +627,16 @@ class TelegramBot:
         try:
             # Use a separate internal user_id so the generation prompt
             # doesn't pollute the owner's real conversation history.
-            content = await asyncio.to_thread(
-                self.brain.think, prompt, user_id=self._INTERNAL_POST_USER_ID
+            content = await self._run_with_typing(
+                update,
+                asyncio.to_thread(self.brain.think, prompt, user_id=self._INTERNAL_POST_USER_ID),
             )
             # Clear the internal conversation so it doesn't accumulate
             self.brain.reset_conversation(self._INTERNAL_POST_USER_ID)
+        except asyncio.TimeoutError:
+            logger.warning("Post generation timed out after %ds", INFERENCE_TIMEOUT)
+            await update.message.reply_text("Post generation timed out. Try again.")
+            return
         except Exception as e:
             logger.error("LLM error generating post: %s", e)
             await update.message.reply_text("Failed to generate post content.")
@@ -1269,6 +1303,10 @@ class TelegramBot:
 
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
         """Log errors and notify the owner via Telegram."""
+        if not context.error:
+            logger.warning("Error handler called with no error.")
+            return
+
         logger.error("Exception while handling an update:", exc_info=context.error)
 
         tb = traceback.format_exception(type(context.error), context.error, context.error.__traceback__)

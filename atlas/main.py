@@ -46,7 +46,12 @@ def main():
     # Load the LLM
     logger.info("Loading AI model (first run downloads it)...")
     brain = Brain(config)
-    brain.initialize()
+    try:
+        brain.initialize()
+    except Exception as e:
+        logger.error("Failed to load AI model: %s", e)
+        logger.error("Check MODEL_NAME, available RAM, and network access on Railway.")
+        sys.exit(1)
     logger.info("Model ready on %s.", brain.device)
 
     # Initialize Arena client
