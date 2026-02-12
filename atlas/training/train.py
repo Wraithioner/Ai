@@ -14,7 +14,6 @@ After training, Atlas will automatically use your fine-tuned brain.
 
 import json
 import logging
-from pathlib import Path
 
 from atlas.core.config import (
     load_config,

@@ -45,6 +45,13 @@ async def send_long(update: Update, text: str, parse_mode: str | None = None):
     chunks = []
     current = ""
     for line in text.split("\n"):
+        # If a single line exceeds the limit, hard-split it
+        while len(line) > TG_MSG_LIMIT:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:TG_MSG_LIMIT])
+            line = line[TG_MSG_LIMIT:]
         if len(current) + len(line) + 1 > TG_MSG_LIMIT:
             if current:
                 chunks.append(current)
@@ -558,6 +565,9 @@ class TelegramBot:
 
         return False
 
+    # Internal user ID for post generation — avoids polluting the owner's conversation
+    _INTERNAL_POST_USER_ID = -1
+
     async def _handle_arena_post_intent(self, update: Update, original_text: str, topic: str):
         """Handle natural language post request: generate content via LLM, then post to Arena."""
         # Extract topic from the message
@@ -576,9 +586,13 @@ class TelegramBot:
         )
 
         try:
+            # Use a separate internal user_id so the generation prompt
+            # doesn't pollute the owner's real conversation history.
             content = await asyncio.to_thread(
-                self.brain.think, prompt, user_id=self.owner_id
+                self.brain.think, prompt, user_id=self._INTERNAL_POST_USER_ID
             )
+            # Clear the internal conversation so it doesn't accumulate
+            self.brain.reset_conversation(self._INTERNAL_POST_USER_ID)
         except Exception as e:
             logger.error("LLM error generating post: %s", e)
             await update.message.reply_text("Failed to generate post content.")
@@ -611,7 +625,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        text = self._extract_args(update, "/post")
+        text = self._extract_args(update)
         if not text:
             await update.message.reply_text("Usage: /post &lt;content&gt;", parse_mode=ParseMode.HTML)
             return
@@ -629,7 +643,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        parts = self._extract_args(update, "/reply")
+        parts = self._extract_args(update)
         if not parts or " " not in parts:
             await update.message.reply_text("Usage: /reply &lt;thread_id&gt; &lt;content&gt;", parse_mode=ParseMode.HTML)
             return
@@ -648,7 +662,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        thread_id = self._extract_args(update, "/delete_post")
+        thread_id = self._extract_args(update)
         if not thread_id:
             await update.message.reply_text("Usage: /delete_post &lt;thread_id&gt;", parse_mode=ParseMode.HTML)
             return
@@ -666,7 +680,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        thread_id = self._extract_args(update, "/like")
+        thread_id = self._extract_args(update)
         if not thread_id:
             await update.message.reply_text("Usage: /like &lt;thread_id&gt;", parse_mode=ParseMode.HTML)
             return
@@ -684,7 +698,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        thread_id = self._extract_args(update, "/repost")
+        thread_id = self._extract_args(update)
         if not thread_id:
             await update.message.reply_text("Usage: /repost &lt;thread_id&gt;", parse_mode=ParseMode.HTML)
             return
@@ -702,7 +716,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        parts = self._extract_args(update, "/quote")
+        parts = self._extract_args(update)
         if not parts or " " not in parts:
             await update.message.reply_text("Usage: /quote &lt;thread_id&gt; &lt;content&gt;", parse_mode=ParseMode.HTML)
             return
@@ -745,7 +759,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        handle = self._extract_args(update, "/userfeed")
+        handle = self._extract_args(update)
         if not handle:
             await update.message.reply_text("Usage: /userfeed &lt;handle&gt;", parse_mode=ParseMode.HTML)
             return
@@ -764,7 +778,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        user_id = self._extract_args(update, "/follow")
+        user_id = self._extract_args(update)
         if not user_id:
             await update.message.reply_text("Usage: /follow &lt;user_id&gt;", parse_mode=ParseMode.HTML)
             return
@@ -782,7 +796,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        user_id = self._extract_args(update, "/unfollow")
+        user_id = self._extract_args(update)
         if not user_id:
             await update.message.reply_text("Usage: /unfollow &lt;user_id&gt;", parse_mode=ParseMode.HTML)
             return
@@ -820,7 +834,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        query = self._extract_args(update, "/search")
+        query = self._extract_args(update)
         if not query:
             await update.message.reply_text("Usage: /search &lt;query&gt;", parse_mode=ParseMode.HTML)
             return
@@ -861,7 +875,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        handle = self._extract_args(update, "/profile")
+        handle = self._extract_args(update)
         if not handle:
             await update.message.reply_text("Usage: /profile &lt;handle&gt;", parse_mode=ParseMode.HTML)
             return
@@ -888,7 +902,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        bio_text = self._extract_args(update, "/bio")
+        bio_text = self._extract_args(update)
         if not bio_text:
             await update.message.reply_text("Usage: /bio &lt;text&gt;", parse_mode=ParseMode.HTML)
             return
@@ -1068,7 +1082,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        parts = self._extract_args(update, "/dm")
+        parts = self._extract_args(update)
         if not parts or " " not in parts:
             await update.message.reply_text("Usage: /dm &lt;user_id&gt; &lt;message&gt;", parse_mode=ParseMode.HTML)
             return
@@ -1130,7 +1144,7 @@ class TelegramBot:
         if not await self._require_arena(update):
             return
 
-        query = self._extract_args(update, "/search_community")
+        query = self._extract_args(update)
         if not query:
             await update.message.reply_text("Usage: /search_community &lt;query&gt;", parse_mode=ParseMode.HTML)
             return
@@ -1158,7 +1172,7 @@ class TelegramBot:
     # HELPERS
     # ================================================================
 
-    def _extract_args(self, update: Update, command: str) -> str:
+    def _extract_args(self, update: Update) -> str:
         """Extract arguments after the command name, handling @botname suffix."""
         if not update.message or not update.message.text:
             return ""
