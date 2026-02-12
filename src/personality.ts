@@ -70,7 +70,7 @@ export const persona = {
 
   // Welcome message
   welcome: (userName: string) =>
-    `${persona.greetings[Math.floor(Math.random() * persona.greetings.length)]}\n\nHey *${userName}* — I'm *${persona.name}*, your personal agent.`,
+    `${persona.greetings[Math.floor(Math.random() * persona.greetings.length)]}\n\nHey ${userName} — I'm ${persona.name}, your personal agent.`,
 
   // Status messages
   status: {

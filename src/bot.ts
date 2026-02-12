@@ -54,12 +54,13 @@ export function createBot(): Bot {
   bot.command("start", async (ctx) => {
     const name = ctx.from?.first_name ?? "boss";
     const welcome = persona.welcome(name);
-    await sendSafe(ctx, `${welcome}\n\n${HELP}`);
+    await sendSafe(ctx, `${welcome}\n\n${HELP}`, "none");
   });
 
   // --- /help ---
   bot.command("help", async (ctx) => {
-    await sendSafe(ctx, `${persona.helpHeader()}\n${HELP}`);
+    const helpText = `${persona.name} — your personal agent.\nSharp, fast, always on.\n\n${HELP}`;
+    await sendSafe(ctx, helpText, "none");
   });
 
   // --- /id ---
@@ -242,7 +243,7 @@ async function handleMediaUpload(ctx: any, type: string) {
 }
 
 /** Send a message, splitting if too long. Falls back to plain text on parse error. */
-async function sendSafe(ctx: any, text: string) {
+async function sendSafe(ctx: any, text: string, mode: string = "Markdown") {
   const chunks: string[] = [];
   for (let i = 0; i < text.length; i += MAX_MSG) {
     chunks.push(text.slice(i, i + MAX_MSG));
@@ -250,7 +251,11 @@ async function sendSafe(ctx: any, text: string) {
 
   for (const chunk of chunks) {
     try {
-      await ctx.reply(chunk, { parse_mode: "Markdown" });
+      if (mode === "none") {
+        await ctx.reply(chunk);
+      } else {
+        await ctx.reply(chunk, { parse_mode: mode });
+      }
     } catch {
       try {
         await ctx.reply(chunk);

@@ -17,72 +17,72 @@ import * as status from "./skills/status.js";
 import * as history from "./skills/history.js";
 import { safeEnvValue, listSafeEnvVars, codeBlock } from "./utils/sanitize.js";
 
-const HELP = `*${persona.name}* — your personal agent. Here's everything:
+const HELP = `${persona.name} — your personal agent. Here's everything:
 
-*System*
-/run \`<cmd>\` — Shell command
+SYSTEM
+/run <cmd> — Shell command
 /sysinfo — System info
-/ps \`[filter]\` — Processes
-/kill \`<pid>\` — Kill process
+/ps [filter] — Processes
+/kill <pid> — Kill process
 /uptime — Bot uptime
-/env \`[name]\` — Environment vars (sensitive masked)
+/env [name] — Environment vars (sensitive masked)
 
-*Files*
-/ls \`[path]\` — List directory
-/read \`<path>\` — Read file
-/head \`<path>\` \`[n]\` — First N lines
-/write \`<path>\` \`<content>\` — Write file
-/rm \`<path>\` — Delete file
-/find \`<dir>\` \`<pattern>\` — Find files
-/grep \`<pattern>\` \`[dir]\` — Search file contents
+FILES
+/ls [path] — List directory
+/read <path> — Read file
+/head <path> [n] — First N lines
+/write <path> <content> — Write file
+/rm <path> — Delete file
+/find <dir> <pattern> — Find files
+/grep <pattern> [dir] — Search file contents
 
-*Network*
-/fetch \`<url>\` — Fetch webpage
-/download \`<url>\` \`[name]\` — Download file
+NETWORK
+/fetch <url> — Fetch webpage
+/download <url> [name] — Download file
 /downloads — List downloads
-/ping \`<host>\` — Ping host
-/dns \`<domain>\` — DNS lookup
-/headers \`<url>\` — HTTP headers
+/ping <host> — Ping host
+/dns <domain> — DNS lookup
+/headers <url> — HTTP headers
 
-*Git*
-/git \`status|log|diff|clone|pull|branch\`
+GIT
+/git status|log|diff|clone|pull|branch
 
-*Notes*
-/note \`<text>\` — Save note
+NOTES
+/note <text> — Save note
 /notes — List all
-/getnote \`<id>\` — View
-/delnote \`<id>\` — Delete
+/getnote <id> — View
+/delnote <id> — Delete
 /clearnotes — Clear all
 
-*Reminders and Cron*
-/remind \`<min>\` \`<msg>\` — One-time reminder
+REMINDERS AND CRON
+/remind <min> <msg> — One-time reminder
 /reminders — List pending
-/cancel \`<id>\` — Cancel reminder
-/cron \`<min>\` \`<cmd>\` — Recurring task
+/cancel <id> — Cancel reminder
+/cron <min> <cmd> — Recurring task
 /crons — List cron jobs
-/rmcron \`<id>\` — Remove cron
+/rmcron <id> — Remove cron
 
-*Communication*
-/email \`<to>\` \`<subject>\` \`<body>\` — Send email
-/webhook \`<url>\` \`<msg>\` — Webhook
-/discord \`<url>\` \`<msg>\` — Discord
-/slack \`<url>\` \`<msg>\` — Slack
-/api \`<METHOD>\` \`<url>\` \`[body]\` — API call
+COMMUNICATION
+/email <to> <subject> <body> — Send email
+/webhook <url> <msg> — Webhook
+/discord <url> <msg> — Discord
+/slack <url> <msg> — Slack
+/api <METHOD> <url> [body] — API call
 
-*Code*
-/eval \`<js>\` — JavaScript (sandboxed)
-/py \`<code>\` — Python
-/scrape \`<url>\` — Scrape page
+CODE
+/eval <js> — JavaScript (sandboxed)
+/py <code> — Python
+/scrape <url> — Scrape page
 
-*Tools*
-/alias \`<name>\` \`<cmd>\` — Create shortcut
+TOOLS
+/alias <name> <cmd> — Create shortcut
 /aliases — List aliases
-/rmalias \`<name>\` — Remove alias
-/sendfile \`<path>\` — Send file to chat
+/rmalias <name> — Remove alias
+/sendfile <path> — Send file to chat
 
-*Meta*
+META
 /status — Dashboard
-/history \`[n]\` — Command log
+/history [n] — Command log
 /clearhistory — Clear log
 /help — This message
 /id — Your Telegram ID`;
