@@ -1,8 +1,7 @@
-"""Actions module - gives Atlas hands to control the computer."""
+"""Actions module - handles direct commands and system actions."""
 
 import logging
 import os
-import platform
 import re
 import subprocess
 import sys
@@ -11,32 +10,32 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Common app names mapped to how to launch them on Windows
-WINDOWS_APPS = {
-    "notepad": "notepad.exe",
-    "calculator": "calc.exe",
-    "calc": "calc.exe",
-    "paint": "mspaint.exe",
-    "file explorer": "explorer.exe",
-    "explorer": "explorer.exe",
-    "files": "explorer.exe",
-    "command prompt": "cmd.exe",
-    "cmd": "cmd.exe",
-    "terminal": "cmd.exe",
+# Common app names mapped to how to launch them
+APPS = {
+    "notepad": "notepad.exe" if sys.platform == "win32" else "gedit",
+    "calculator": "calc.exe" if sys.platform == "win32" else "gnome-calculator",
+    "calc": "calc.exe" if sys.platform == "win32" else "gnome-calculator",
+    "paint": "mspaint.exe" if sys.platform == "win32" else "gimp",
+    "file explorer": "explorer.exe" if sys.platform == "win32" else "nautilus",
+    "explorer": "explorer.exe" if sys.platform == "win32" else "nautilus",
+    "files": "explorer.exe" if sys.platform == "win32" else "nautilus",
+    "command prompt": "cmd.exe" if sys.platform == "win32" else "x-terminal-emulator",
+    "cmd": "cmd.exe" if sys.platform == "win32" else "x-terminal-emulator",
+    "terminal": "cmd.exe" if sys.platform == "win32" else "x-terminal-emulator",
     "powershell": "powershell.exe",
-    "task manager": "taskmgr.exe",
-    "settings": "ms-settings:",
+    "task manager": "taskmgr.exe" if sys.platform == "win32" else "gnome-system-monitor",
+    "settings": "ms-settings:" if sys.platform == "win32" else "gnome-control-center",
     "control panel": "control.exe",
     "snipping tool": "snippingtool.exe",
     "word": "winword.exe",
     "excel": "excel.exe",
     "powerpoint": "powerpnt.exe",
     "outlook": "outlook.exe",
-    "chrome": "chrome",
-    "google chrome": "chrome",
+    "chrome": "chrome" if sys.platform == "win32" else "google-chrome",
+    "google chrome": "chrome" if sys.platform == "win32" else "google-chrome",
     "firefox": "firefox",
-    "edge": "msedge",
-    "microsoft edge": "msedge",
+    "edge": "msedge" if sys.platform == "win32" else "microsoft-edge",
+    "microsoft edge": "msedge" if sys.platform == "win32" else "microsoft-edge",
     "spotify": "spotify",
     "discord": "discord",
     "steam": "steam",
@@ -66,6 +65,50 @@ WEBSITE_SHORTCUTS = {
     "linkedin": "https://www.linkedin.com",
 }
 
+# Process names for closing apps (cross-platform)
+PROCESS_NAMES = {
+    "notepad": ("notepad.exe", "gedit"),
+    "calculator": ("Calculator.exe", "gnome-calculator"),
+    "calc": ("Calculator.exe", "gnome-calculator"),
+    "paint": ("mspaint.exe", "gimp"),
+    "chrome": ("chrome.exe", "google-chrome"),
+    "google chrome": ("chrome.exe", "google-chrome"),
+    "firefox": ("firefox.exe", "firefox"),
+    "edge": ("msedge.exe", "microsoft-edge"),
+    "spotify": ("Spotify.exe", "spotify"),
+    "discord": ("Discord.exe", "discord"),
+    "vscode": ("Code.exe", "code"),
+    "vs code": ("Code.exe", "code"),
+}
+
+# Pre-compiled regex patterns for command matching
+_RE_OPEN = re.compile(r"^(?:open|launch|start|run)\s+(.+)", re.IGNORECASE)
+_RE_GOTO = re.compile(r"^(?:go to|navigate to|visit)\s+(.+)", re.IGNORECASE)
+_RE_SEARCH = re.compile(r"^(?:search|search for|google|look up)\s+(.+)", re.IGNORECASE)
+_RE_CLOSE = re.compile(r"^(?:close|kill|stop|end)\s+(.+)", re.IGNORECASE)
+_RE_TIME = re.compile(r"what(?:'s| is) the time|what time is it|tell me the time", re.IGNORECASE)
+_RE_DATE = re.compile(r"what(?:'s| is) the date|what(?:'s| is) today|tell me the date", re.IGNORECASE)
+_RE_EYES = re.compile(
+    r"what do you see|what(?:'s| is) on (?:my |the )?screen|"
+    r"look at (?:my |the )?screen|describe (?:my |the )?screen|"
+    r"what are you looking at|take a screenshot|"
+    r"what(?:'s| is) on (?:my |the )?(?:display|monitor)|"
+    r"can you see (?:my |the )?screen|read (?:my |the )?screen",
+    re.IGNORECASE,
+)
+_RE_COMPUTER = re.compile(
+    r"click (?:on |the )?|log ?in(?:to| to)?|sign ?in(?:to| to)?|"
+    r"type .+ (?:in|into|on)|go to .+ and (?:click|type|enter)|"
+    r"fill .+ out|navigate to .+ and (?:click|type)|"
+    r"scroll (?:up|down)|press (?:enter|tab|escape)",
+    re.IGNORECASE,
+)
+_RE_URL = [
+    re.compile(r"^https?://", re.IGNORECASE),
+    re.compile(r"^www\.", re.IGNORECASE),
+    re.compile(r"\.(com|org|net|io|dev|co|edu|gov|app|me|tv|gg)(/|$)", re.IGNORECASE),
+]
+
 
 class Actions:
     """Parses user commands and executes system actions."""
@@ -74,8 +117,7 @@ class Actions:
         self.is_windows = sys.platform == "win32"
 
     def try_handle(self, text: str) -> tuple[bool, str | None]:
-        """
-        Try to parse and execute an action from the user's text.
+        """Try to parse and execute an action from the user's text.
 
         Returns:
             (handled, response) — if handled is True, response is what to say.
@@ -84,58 +126,45 @@ class Actions:
         lower = text.lower().strip()
 
         # --- "open [something]" ---
-        match = re.match(r"^(?:open|launch|start|run)\s+(.+)", lower)
+        match = _RE_OPEN.match(lower)
         if match:
             target = match.group(1).strip()
             return self._handle_open(target, text)
 
         # --- "go to [url]" ---
-        match = re.match(r"^(?:go to|navigate to|visit)\s+(.+)", lower)
+        match = _RE_GOTO.match(lower)
         if match:
             target = match.group(1).strip()
             return self._handle_url(target)
 
         # --- "search for [query]" / "google [query]" ---
-        match = re.match(r"^(?:search|search for|google|look up)\s+(.+)", lower)
+        match = _RE_SEARCH.match(lower)
         if match:
             query = match.group(1).strip()
             return self._handle_search(query)
 
         # --- "close [app]" ---
-        match = re.match(r"^(?:close|kill|stop|end)\s+(.+)", lower)
+        match = _RE_CLOSE.match(lower)
         if match:
             target = match.group(1).strip()
             return self._handle_close(target)
 
         # --- "what time is it" ---
-        if re.search(r"what(?:'s| is) the time|what time is it|tell me the time", lower):
+        if _RE_TIME.search(lower):
             now = datetime.now().strftime("%I:%M %p")
             return True, f"It's {now}."
 
         # --- "what's the date" ---
-        if re.search(r"what(?:'s| is) the date|what(?:'s| is) today|tell me the date", lower):
+        if _RE_DATE.search(lower):
             today = datetime.now().strftime("%A, %B %d, %Y")
             return True, f"Today is {today}."
 
         # --- "what do you see" / "look at my screen" ---
-        if re.search(
-            r"what do you see|what(?:'s| is) on (?:my |the )?screen|"
-            r"look at (?:my |the )?screen|describe (?:my |the )?screen|"
-            r"what are you looking at|take a screenshot|"
-            r"what(?:'s| is) on (?:my |the )?(?:display|monitor)|"
-            r"can you see (?:my |the )?screen|read (?:my |the )?screen",
-            lower,
-        ):
+        if _RE_EYES.search(lower):
             return True, "__EYES__"
 
         # --- computer control commands ---
-        if re.search(
-            r"click (?:on |the )?|log ?in(?:to| to)?|sign ?in(?:to| to)?|"
-            r"type .+ (?:in|into|on)|go to .+ and (?:click|type|enter)|"
-            r"fill .+ out|navigate to .+ and (?:click|type)|"
-            r"scroll (?:up|down)|press (?:enter|tab|escape)",
-            lower,
-        ):
+        if _RE_COMPUTER.search(lower):
             return True, "__COMPUTER__"
 
         # Not an action
@@ -153,12 +182,12 @@ class Actions:
                 return self._open_url(url, name)
 
         # Check known apps
-        for name, cmd in WINDOWS_APPS.items():
+        for name, cmd in APPS.items():
             if target == name or target == f"the {name}":
                 return self._open_app(cmd, name)
 
         # Try partial matching (e.g., "open the chrome browser" matches "chrome")
-        for name, cmd in WINDOWS_APPS.items():
+        for name, cmd in APPS.items():
             if name in target:
                 return self._open_app(cmd, name)
 
@@ -171,7 +200,6 @@ class Actions:
 
     def _handle_url(self, target: str) -> tuple[bool, str]:
         """Handle URL navigation."""
-        # Clean up common speech artifacts
         target = target.strip().rstrip(".")
 
         # Check website shortcuts first
@@ -198,39 +226,31 @@ class Actions:
             return True, f"I couldn't search for that. {e}"
 
     def _handle_close(self, target: str) -> tuple[bool, str]:
-        """Handle 'close [app]' commands."""
-        if not self.is_windows:
-            return True, "I can only close apps on Windows right now."
-
-        # Map target to process name
-        process_map = {
-            "notepad": "notepad.exe",
-            "calculator": "Calculator.exe",
-            "calc": "Calculator.exe",
-            "paint": "mspaint.exe",
-            "chrome": "chrome.exe",
-            "google chrome": "chrome.exe",
-            "firefox": "firefox.exe",
-            "edge": "msedge.exe",
-            "spotify": "Spotify.exe",
-            "discord": "Discord.exe",
-        }
-
-        proc_name = None
-        for name, proc in process_map.items():
+        """Handle 'close [app]' commands (cross-platform)."""
+        # Find matching process name
+        proc_win = None
+        proc_linux = None
+        for name, (win_proc, linux_proc) in PROCESS_NAMES.items():
             if name in target:
-                proc_name = proc
+                proc_win = win_proc
+                proc_linux = linux_proc
                 break
 
-        if not proc_name:
+        if proc_win is None:
             return True, f"I don't know how to close {target}."
 
         try:
-            subprocess.run(
-                ["taskkill", "/IM", proc_name, "/F"],
-                capture_output=True, timeout=5,
-            )
-            logger.info("Closed %s", proc_name)
+            if self.is_windows:
+                subprocess.run(
+                    ["taskkill", "/IM", proc_win, "/F"],
+                    capture_output=True, timeout=5,
+                )
+            else:
+                subprocess.run(
+                    ["killall", proc_linux],
+                    capture_output=True, timeout=5,
+                )
+            logger.info("Closed %s", target)
             return True, f"Closed {target}."
         except Exception as e:
             logger.error("Failed to close %s: %s", target, e)
@@ -275,13 +295,4 @@ class Actions:
 
     def _looks_like_url(self, text: str) -> bool:
         """Check if text looks like a URL or domain name."""
-        url_patterns = [
-            r"^https?://",
-            r"^www\.",
-            r"\.(com|org|net|io|dev|co|edu|gov|app|me|tv|gg)$",
-            r"\.(com|org|net|io|dev|co|edu|gov|app|me|tv|gg)/",
-        ]
-        for pattern in url_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                return True
-        return False
+        return any(pattern.search(text) for pattern in _RE_URL)

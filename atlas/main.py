@@ -18,6 +18,83 @@ from atlas.core.voice import Voice
 
 logger = logging.getLogger("atlas")
 
+# Common Whisper misrecognitions of "atlas" — defined once, used everywhere
+WAKE_WORD_VARIANTS = [
+    "atlas", "at last", "at less", "adless",
+    "atlast", "atlass", "atlus", "at las",
+]
+
+
+def strip_wake_word(text: str, wake_word: str) -> str:
+    """Remove the wake word and its common variants from text."""
+    clean = text
+    variants = [wake_word] + [v for v in WAKE_WORD_VARIANTS if v != wake_word]
+    for variant in variants:
+        clean = re.sub(
+            rf"\b{re.escape(variant)}\b[,]?\s*",
+            "", clean, flags=re.IGNORECASE,
+        ).strip()
+    return clean
+
+
+def has_wake_word(text: str, wake_word: str) -> bool:
+    """Check if text contains the wake word or any common variant."""
+    lower = text.lower()
+    variants = [wake_word] + [v for v in WAKE_WORD_VARIANTS if v != wake_word]
+    return any(variant in lower for variant in variants)
+
+
+def is_stop_command(text: str, wake_word_enabled: bool = False, wake_word: str = "atlas") -> bool:
+    """Check if text is a stop/interrupt command."""
+    lower = text.lower().strip()
+    stop_words = [
+        "stop", "cancel", "abort", "halt",
+        "nevermind", "never mind", "shut up",
+    ]
+    if any(sw in lower for sw in stop_words):
+        return True
+    if wake_word_enabled:
+        cleaned = strip_wake_word(lower, wake_word)
+        if cleaned != lower and any(sw in cleaned for sw in stop_words):
+            return True
+    return False
+
+
+def execute_agent_action(action: dict, computer: Computer, eyes: Eyes) -> bool:
+    """Execute a single agent action. Returns True if execution should continue.
+
+    Shared between voice mode and text mode to avoid code duplication.
+    """
+    action_type = action.get("action", "fail")
+
+    if action_type == "click":
+        target = action.get("target", "")
+        coords = eyes.find_text(target)
+        if coords:
+            computer.click(*coords)
+        else:
+            return False  # can't find target
+
+    elif action_type == "type":
+        computer.type_text(action.get("value", ""))
+
+    elif action_type == "press":
+        computer.press_key(action.get("value", "enter"))
+
+    elif action_type == "hotkey":
+        keys = [k.strip() for k in action.get("value", "").split("+")]
+        computer.hotkey(*keys)
+
+    elif action_type == "scroll":
+        direction = action.get("value", "down")
+        computer.scroll(3 if direction == "down" else -3)
+
+    else:
+        logger.warning("Unknown action type: %s", action_type)
+        return False
+
+    return True
+
 
 class VoiceAgent:
     """The main AI voice agent that listens, thinks, speaks, and controls the computer."""
@@ -62,15 +139,12 @@ class VoiceAgent:
         logger.info("  Atlas - Local AI Voice Agent - Starting Up")
         logger.info("=" * 50)
 
-        # Load the LLM brain
         logger.info("Loading AI model (first run will download it)...")
         self.brain.initialize()
 
-        # Load speech-to-text
         logger.info("Initializing speech recognition...")
         self.ears.initialize()
 
-        # Load text-to-speech
         logger.info("Initializing voice synthesis...")
         self.voice.initialize()
 
@@ -85,6 +159,9 @@ class VoiceAgent:
             logger.info("Agent step %d/%d", step + 1, max_steps)
 
             try:
+                # Invalidate OCR cache before each step (screen may have changed)
+                self.eyes.invalidate_cache()
+
                 # 1. Observe — read the screen
                 screen_text = self.eyes.read_screen()
                 if not screen_text:
@@ -118,7 +195,7 @@ class VoiceAgent:
                     logger.warning("Safety blocked action: %s", safety_reason)
                     break
 
-                # 5. Execute the action
+                # 5. Execute the action (uses cached OCR for find_text)
                 if action_type == "click":
                     target = action.get("target", "")
                     coords = self.eyes.find_text(target)
@@ -127,27 +204,7 @@ class VoiceAgent:
                     else:
                         self.voice.speak(f"I can't find '{target}' on the screen.")
                         break
-
-                elif action_type == "type":
-                    value = action.get("value", "")
-                    self.computer.type_text(value)
-
-                elif action_type == "press":
-                    key = action.get("value", "enter")
-                    self.computer.press_key(key)
-
-                elif action_type == "hotkey":
-                    keys_str = action.get("value", "")
-                    keys = [k.strip() for k in keys_str.split("+")]
-                    self.computer.hotkey(*keys)
-
-                elif action_type == "scroll":
-                    direction = action.get("value", "down")
-                    clicks = 3 if direction == "down" else -3
-                    self.computer.scroll(clicks)
-
-                else:
-                    logger.warning("Unknown action type: %s", action_type)
+                elif not execute_agent_action(action, self.computer, self.eyes):
                     break
 
                 # Wait for the screen to update before next step
@@ -168,10 +225,10 @@ class VoiceAgent:
     def _speak_interruptible(self, text: str):
         """Speak text asynchronously while polling the always-on mic.
 
-        Starts SAPI async speech, then polls each audio chunk in
-        real-time on the persistent mic stream. If the user speaks
-        loud enough to pass the high VAD threshold (0.85), it records
-        the utterance, transcribes it, and either stops or processes it.
+        Starts async speech (threaded for Piper, native async for SAPI),
+        then polls each audio chunk in real-time on the persistent mic stream.
+        If the user speaks loud enough to pass the high VAD threshold (0.85),
+        it records the utterance, transcribes it, and either stops or processes it.
         """
         if not text:
             return
@@ -184,7 +241,7 @@ class VoiceAgent:
             heard = self.ears.poll_for_speech(vad_threshold=0.85)
 
             if heard:
-                if self._is_stop_command(heard):
+                if is_stop_command(heard, self.wake_word_enabled, self.wake_word):
                     self.voice.stop()
                     logger.info("User interrupted with stop: %s", heard)
                     self.voice.speak("Okay.")
@@ -245,29 +302,6 @@ class VoiceAgent:
         # Speak interruptibly
         self._speak_interruptible(response)
 
-    def _is_stop_command(self, text: str) -> bool:
-        """Check if text is a stop/interrupt command."""
-        lower = text.lower().strip()
-        stop_words = [
-            "stop", "cancel", "abort", "halt",
-            "nevermind", "never mind", "shut up",
-        ]
-        if any(sw in lower for sw in stop_words):
-            return True
-        # Check after stripping wake word
-        if self.wake_word_enabled:
-            for variant in [
-                self.wake_word, "at last", "at less", "adless",
-                "atlast", "atlass", "atlus", "at las",
-            ]:
-                lower = re.sub(
-                    rf"\b{re.escape(variant)}\b[,]?\s*",
-                    "", lower, flags=re.IGNORECASE,
-                ).strip()
-            if any(sw in lower for sw in stop_words):
-                return True
-        return False
-
     def run(self):
         """Main loop: listen -> think -> speak -> repeat.
 
@@ -299,10 +333,8 @@ class VoiceAgent:
                 if text is None:
                     continue
 
-                lower = text.lower().strip()
-
                 # Check for stop/interrupt FIRST
-                if self._is_stop_command(text):
+                if is_stop_command(text, self.wake_word_enabled, self.wake_word):
                     self.voice.stop()
                     logger.info("User said stop: %s", text)
                     self.voice.speak("Okay.")
@@ -310,43 +342,16 @@ class VoiceAgent:
 
                 # Wake word filtering
                 if self.wake_word_enabled:
-                    wake_variants = [
-                        self.wake_word, "at last", "at less", "adless",
-                        "atlast", "atlass", "atlus", "at las",
-                    ]
-                    found_wake = False
-                    for variant in wake_variants:
-                        if variant in lower:
-                            found_wake = True
-                            break
-                    if not found_wake:
+                    if not has_wake_word(text, self.wake_word):
                         logger.debug("Ignored (no wake word): %s", text)
                         continue
 
-                # Strip the wake word
-                if self.wake_word_enabled:
-                    clean = text
-                    for variant in [
-                        self.wake_word, "at last", "at less", "adless",
-                        "atlast", "atlass", "atlus", "at las",
-                    ]:
-                        clean = re.sub(
-                            rf"\b{re.escape(variant)}\b[,]?\s*",
-                            "",
-                            clean,
-                            flags=re.IGNORECASE,
-                        ).strip()
+                    # Strip the wake word
+                    clean = strip_wake_word(text, self.wake_word)
                     if clean:
                         text = clean
                     else:
                         self.voice.speak("Yes? I'm listening.")
-                        continue
-
-                    # Check if cleaned text is a stop command
-                    if self._is_stop_command(clean):
-                        self.voice.stop()
-                        logger.info("User said stop: %s", text)
-                        self.voice.speak("Okay.")
                         continue
 
                 # Handle the input (actions, LLM, etc.)
@@ -468,6 +473,9 @@ def _text_agent_loop(task: str, brain: Brain, computer: Computer, eyes: Eyes, sa
         print(f"  [Step {step + 1}/{max_steps}]")
 
         try:
+            # Invalidate cache before each step
+            eyes.invalidate_cache()
+
             screen_text = eyes.read_screen()
             if not screen_text:
                 print("Atlas: I can't read the screen right now.\n")
@@ -492,6 +500,7 @@ def _text_agent_loop(task: str, brain: Brain, computer: Computer, eyes: Eyes, sa
                 print(f"Atlas: {safety_reason}\n")
                 break
 
+            # Use shared action execution (cached OCR for find_text)
             if action_type == "click":
                 target = action.get("target", "")
                 coords = eyes.find_text(target)
@@ -500,21 +509,10 @@ def _text_agent_loop(task: str, brain: Brain, computer: Computer, eyes: Eyes, sa
                 else:
                     print(f"Atlas: Can't find '{target}' on screen.\n")
                     break
-            elif action_type == "type":
-                computer.type_text(action.get("value", ""))
-            elif action_type == "press":
-                computer.press_key(action.get("value", "enter"))
-            elif action_type == "hotkey":
-                keys = [k.strip() for k in action.get("value", "").split("+")]
-                computer.hotkey(*keys)
-            elif action_type == "scroll":
-                direction = action.get("value", "down")
-                computer.scroll(3 if direction == "down" else -3)
-            else:
+            elif not execute_agent_action(action, computer, eyes):
                 print(f"Atlas: Unknown action type: {action_type}\n")
                 break
 
-            import time
             time.sleep(1.5)
 
         except Exception as e:

@@ -1,6 +1,5 @@
 """Configuration loader for Atlas."""
 
-import os
 import sys
 from pathlib import Path
 
@@ -35,9 +34,9 @@ def load_config(config_path: str | None = None) -> dict:
     with open(path) as f:
         config = yaml.safe_load(f)
 
-    # Set log file to logs/ directory
+    # Resolve relative log file paths to project logs/ directory
     log_file = config.get("logging", {}).get("file", "")
-    if log_file:
-        config["logging"]["file"] = str(LOG_DIR / "atlas.log")
+    if log_file and not Path(log_file).is_absolute():
+        config["logging"]["file"] = str(LOG_DIR / Path(log_file).name)
 
     return config

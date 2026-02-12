@@ -14,6 +14,10 @@ class Eyes:
     - read_screen(): get all screen text as a single string
     - find_text(): find the screen coordinates of specific text
     - look(): convenience method for read_screen()
+
+    Optimizations:
+    - Uses BILINEAR resize instead of LANCZOS (faster, adequate for OCR)
+    - Caches last OCR results to avoid duplicate captures in agent steps
     """
 
     def __init__(self, config: dict):
@@ -25,6 +29,9 @@ class Eyes:
         self._loaded = False
         # Store the original screenshot size for coordinate mapping
         self._last_screenshot_size = None
+        # Cache last OCR results to avoid duplicate processing in agent steps
+        self._cached_results = None
+        self._cached_screen_text = None
 
     def initialize(self):
         """Load the EasyOCR reader into memory."""
@@ -48,6 +55,12 @@ class Eyes:
             self._loaded = False
             gc.collect()
             logger.info("EasyOCR unloaded to free RAM.")
+        self.invalidate_cache()
+
+    def invalidate_cache(self):
+        """Clear cached OCR results. Call when the screen may have changed."""
+        self._cached_results = None
+        self._cached_screen_text = None
 
     def capture_screen(self):
         """Take a screenshot of the primary monitor. Returns (image, original_size)."""
@@ -62,24 +75,30 @@ class Eyes:
         original_size = img.size  # (width, height) before resize
         self._last_screenshot_size = original_size
 
-        # Resize for faster OCR while keeping coordinate mapping possible
+        # Resize for faster OCR (BILINEAR is faster than LANCZOS, adequate for text)
         max_dim = 1920
         if img.width > max_dim or img.height > max_dim:
             scale = max_dim / max(img.width, img.height)
             new_w = int(img.width * scale)
             new_h = int(img.height * scale)
-            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            img = img.resize((new_w, new_h), Image.Resampling.BILINEAR)
 
         return img, original_size
 
     def read_text(self, image=None):
         """OCR the screen and return text with bounding boxes.
 
+        Returns cached results if available (same agent step).
+
         Returns:
             list of dicts: [{"text": "Login", "bbox": [[x1,y1],...], "confidence": 0.95}, ...]
             Coordinates are in ORIGINAL screen pixels (not resized).
         """
         import numpy as np
+
+        # Return cached results if available
+        if image is None and self._cached_results is not None:
+            return self._cached_results
 
         if not self._loaded:
             self.initialize()
@@ -111,16 +130,32 @@ class Eyes:
                 "confidence": confidence,
             })
 
+        # Cache results for this agent step
+        if image is None or self._cached_results is None:
+            self._cached_results = parsed
+
         return parsed
 
     def read_screen(self, image=None) -> str:
         """Capture screen and return all text as a single string."""
+        # Return cached screen text if available
+        if image is None and self._cached_screen_text is not None:
+            return self._cached_screen_text
+
         results = self.read_text(image)
         texts = [r["text"] for r in results if r["confidence"] > 0.3]
-        return " ".join(texts)
+        screen_text = " ".join(texts)
+
+        # Cache for this agent step
+        if image is None:
+            self._cached_screen_text = screen_text
+
+        return screen_text
 
     def find_text(self, target: str, image=None):
         """Find the center screen coordinates of specific text.
+
+        Uses cached OCR results if available (avoids duplicate screenshot+OCR).
 
         Args:
             target: text to search for (case-insensitive partial match)

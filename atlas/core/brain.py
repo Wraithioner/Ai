@@ -5,6 +5,7 @@ import logging
 import re
 from pathlib import Path
 
+import torch
 from atlas.core.config import MODEL_CACHE_DIR, MODELS_DIR
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,6 @@ class Brain:
         Auto-detects CUDA and uses float16 on GPU for speed,
         falls back to float32 on CPU.
         """
-        import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         # Auto-detect best device and dtype
@@ -127,15 +127,19 @@ class Brain:
         return messages
 
     def _generate(self, messages: list[dict], max_new_tokens: int | None = None) -> str:
-        """Run inference on a list of chat messages. Returns the raw reply text."""
-        import torch
+        """Run inference on a list of chat messages. Returns the raw reply text.
 
+        Uses apply_chat_template with tokenize=True to avoid double tokenization.
+        """
         max_new_tokens = max_new_tokens or self.max_tokens
 
-        input_text = self.tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+        inputs = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_tensors="pt",
+            return_dict=True,
         )
-        inputs = self.tokenizer(input_text, return_tensors="pt")
 
         # Move inputs to the same device as the model
         if self.device == "cuda":
@@ -159,6 +163,12 @@ class Brain:
     def think(self, user_text: str) -> str:
         """Send user text to the LLM and get a conversational response."""
         self.conversation.append({"role": "user", "content": user_text})
+
+        # Trim conversation history to prevent unbounded memory growth
+        max_entries = self.max_context * 2
+        if len(self.conversation) > max_entries:
+            self.conversation = self.conversation[-max_entries:]
+
         messages = self._build_messages()
 
         try:

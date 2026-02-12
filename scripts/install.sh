@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # ============================================
-# Local AI Voice Agent - Installation Script
+# Atlas - Local AI Voice Agent - Installation
 # ============================================
-# This script installs everything needed to run
-# your personal AI voice agent 100% locally.
-# No API keys. No cloud. Just your PC.
+# Installs everything needed to run Atlas
+# 100% locally. No API keys. No cloud.
 # ============================================
 
 set -e
@@ -39,13 +38,14 @@ print_error() {
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-print_header "Local AI Voice Agent - Installer"
+print_header "Atlas - Local AI Voice Agent - Installer"
 
 echo "This will install:"
-echo "  1. System dependencies (audio libraries)"
-echo "  2. Ollama (local LLM runtime)"
-echo "  3. Python packages (Whisper, Piper, etc.)"
-echo "  4. A default AI model (llama3.1:8b)"
+echo "  1. System dependencies (audio libraries, ffmpeg)"
+echo "  2. Python virtual environment"
+echo "  3. All Python packages from requirements.txt"
+echo ""
+echo "No external servers needed — everything runs locally."
 echo ""
 read -p "Continue? [Y/n] " -n 1 -r
 echo ""
@@ -55,7 +55,7 @@ if [[ $REPLY =~ ^[Nn]$ ]]; then
 fi
 
 # ---- Step 1: System dependencies ----
-print_header "Step 1/5: System Dependencies"
+print_header "Step 1/3: System Dependencies"
 
 if command -v apt-get &> /dev/null; then
     print_step "Detected Debian/Ubuntu. Installing with apt..."
@@ -90,34 +90,8 @@ else
     print_warn "  python3, pip, portaudio, alsa-utils, ffmpeg"
 fi
 
-# ---- Step 2: Ollama ----
-print_header "Step 2/5: Ollama (Local LLM Runtime)"
-
-if command -v ollama &> /dev/null; then
-    print_step "Ollama is already installed."
-else
-    print_step "Installing Ollama..."
-    curl -fsSL https://ollama.com/install.sh | sh
-    print_step "Ollama installed."
-fi
-
-# Start Ollama in background if not running
-if ! pgrep -x "ollama" > /dev/null; then
-    print_step "Starting Ollama server..."
-    ollama serve &>/dev/null &
-    sleep 3
-fi
-
-# ---- Step 3: Pull AI Model ----
-print_header "Step 3/5: Downloading AI Model"
-
-MODEL="llama3.1:8b"
-print_step "Pulling model: $MODEL (this may take a while on first run)..."
-ollama pull "$MODEL"
-print_step "Model ready!"
-
-# ---- Step 4: Python environment ----
-print_header "Step 4/5: Python Environment"
+# ---- Step 2: Python environment ----
+print_header "Step 2/3: Python Environment"
 
 VENV_DIR="$PROJECT_DIR/.venv"
 
@@ -129,45 +103,36 @@ fi
 print_step "Activating virtual environment..."
 source "$VENV_DIR/bin/activate"
 
-print_step "Installing Python packages..."
+print_step "Upgrading pip..."
 pip install --upgrade pip -q
 
-pip install -q \
-    openai-whisper \
-    piper-tts \
-    torch \
-    torchaudio \
-    numpy \
-    PyAudio \
-    requests \
-    pyyaml
+print_step "Installing Python packages from requirements.txt..."
+pip install -r "$PROJECT_DIR/requirements.txt" -q
 
 print_step "Python packages installed."
 
-# ---- Step 5: Systemd service ----
-print_header "Step 5/5: Auto-Start Service (Optional)"
+# ---- Step 3: Systemd service (optional) ----
+print_header "Step 3/3: Auto-Start Service (Optional)"
 
-echo "Would you like the AI agent to start automatically when your PC boots?"
+echo "Would you like Atlas to start automatically when your PC boots?"
 read -p "Install systemd service? [y/N] " -n 1 -r
 echo ""
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    SERVICE_FILE="/etc/systemd/system/ai-agent.service"
+    SERVICE_FILE="/etc/systemd/system/atlas-agent.service"
     CURRENT_USER=$(whoami)
 
     sudo tee "$SERVICE_FILE" > /dev/null << SERVICEEOF
 [Unit]
-Description=Local AI Voice Agent
+Description=Atlas - Local AI Voice Agent
 After=network.target sound.target
-Wants=network.target
 
 [Service]
 Type=simple
 User=$CURRENT_USER
 WorkingDirectory=$PROJECT_DIR
 Environment="PATH=$VENV_DIR/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStartPre=/bin/bash -c 'until curl -s http://localhost:11434/api/tags > /dev/null 2>&1; do sleep 2; done'
-ExecStart=$VENV_DIR/bin/python -m agent.main
+ExecStart=$VENV_DIR/bin/python -m atlas.main
 Restart=on-failure
 RestartSec=5
 
@@ -176,34 +141,37 @@ WantedBy=multi-user.target
 SERVICEEOF
 
     sudo systemctl daemon-reload
-    sudo systemctl enable ai-agent.service
+    sudo systemctl enable atlas-agent.service
     print_step "Service installed and enabled!"
     print_step "It will start automatically on next boot."
     echo ""
     echo "  Manual controls:"
-    echo "    sudo systemctl start ai-agent    # Start now"
-    echo "    sudo systemctl stop ai-agent     # Stop"
-    echo "    sudo systemctl status ai-agent   # Check status"
-    echo "    journalctl -u ai-agent -f        # View logs"
+    echo "    sudo systemctl start atlas-agent    # Start now"
+    echo "    sudo systemctl stop atlas-agent     # Stop"
+    echo "    sudo systemctl status atlas-agent   # Check status"
+    echo "    journalctl -u atlas-agent -f        # View logs"
 else
     print_step "Skipped. You can run manually with:"
     echo "    cd $PROJECT_DIR"
     echo "    source .venv/bin/activate"
-    echo "    python -m agent.main"
+    echo "    python -m atlas.main"
 fi
 
 # ---- Done ----
 print_header "Installation Complete!"
 
-echo "Your local AI voice agent is ready to go!"
+echo "Atlas is ready to go!"
 echo ""
-echo "  To start it:"
+echo "  To start (voice mode):"
 echo "    cd $PROJECT_DIR"
 echo "    source .venv/bin/activate"
-echo "    python -m agent.main"
+echo "    python -m atlas.main"
 echo ""
-echo "  To test in text mode (no microphone needed):"
-echo "    python -m agent.main --text-mode"
+echo "  To start (text mode - no microphone needed):"
+echo "    python -m atlas.main --text-mode"
+echo ""
+echo "  To train Atlas's brain:"
+echo "    python -m atlas.main --train"
 echo ""
 echo "  Configuration: $PROJECT_DIR/config/settings.yaml"
 echo ""

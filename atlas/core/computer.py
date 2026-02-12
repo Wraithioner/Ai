@@ -4,6 +4,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# pyautogui is imported once at first use and cached
+_pyautogui = None
+
+
+def _get_pyautogui():
+    """Lazy-import pyautogui once and cache it."""
+    global _pyautogui
+    if _pyautogui is None:
+        import pyautogui
+        _pyautogui = pyautogui
+    return _pyautogui
+
 
 class Computer:
     """Controls the mouse and keyboard using pyautogui.
@@ -30,63 +42,55 @@ class Computer:
             )
 
         if not self._initialized:
-            import pyautogui
-            pyautogui.FAILSAFE = self._failsafe
-            pyautogui.PAUSE = self._pause
+            gui = _get_pyautogui()
+            gui.FAILSAFE = self._failsafe
+            gui.PAUSE = self._pause
             self._initialized = True
 
     def click(self, x: int, y: int):
         """Move to (x, y) and left-click."""
-        import pyautogui
         self._ensure_ready()
         logger.info("Click at (%d, %d)", x, y)
-        pyautogui.click(x, y)
+        _get_pyautogui().click(x, y)
 
     def double_click(self, x: int, y: int):
         """Move to (x, y) and double-click."""
-        import pyautogui
         self._ensure_ready()
         logger.info("Double-click at (%d, %d)", x, y)
-        pyautogui.doubleClick(x, y)
+        _get_pyautogui().doubleClick(x, y)
 
     def right_click(self, x: int, y: int):
         """Move to (x, y) and right-click."""
-        import pyautogui
         self._ensure_ready()
         logger.info("Right-click at (%d, %d)", x, y)
-        pyautogui.rightClick(x, y)
+        _get_pyautogui().rightClick(x, y)
 
     def type_text(self, text: str, interval: float = 0.05):
         """Type text character by character."""
-        import pyautogui
         self._ensure_ready()
         logger.info("Typing: %s", text[:50])
-        pyautogui.write(text, interval=interval)
+        _get_pyautogui().write(text, interval=interval)
 
     def press_key(self, key: str):
         """Press a single key (enter, tab, escape, space, backspace, etc.)."""
-        import pyautogui
         self._ensure_ready()
         logger.info("Press key: %s", key)
-        pyautogui.press(key)
+        _get_pyautogui().press(key)
 
     def hotkey(self, *keys: str):
         """Press a key combination (e.g., hotkey('ctrl', 'c'))."""
-        import pyautogui
         self._ensure_ready()
         logger.info("Hotkey: %s", "+".join(keys))
-        pyautogui.hotkey(*keys)
+        _get_pyautogui().hotkey(*keys)
 
     def scroll(self, clicks: int, x: int | None = None, y: int | None = None):
         """Scroll up (positive) or down (negative)."""
-        import pyautogui
         self._ensure_ready()
         logger.info("Scroll %d at (%s, %s)", clicks, x, y)
-        pyautogui.scroll(clicks, x=x, y=y)
+        _get_pyautogui().scroll(clicks, x=x, y=y)
 
     def move_to(self, x: int, y: int):
         """Move the mouse cursor to (x, y) without clicking."""
-        import pyautogui
         self._ensure_ready()
         logger.info("Move to (%d, %d)", x, y)
-        pyautogui.moveTo(x, y)
+        _get_pyautogui().moveTo(x, y)

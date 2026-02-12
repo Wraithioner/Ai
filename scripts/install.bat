@@ -3,7 +3,7 @@ REM ============================================
 REM Atlas - Local AI Voice Agent (Windows)
 REM ============================================
 REM Installs everything needed to run Atlas.
-REM No API keys. No cloud. No Ollama. Just Python.
+REM No API keys. No cloud. Just Python.
 REM ============================================
 
 echo.
@@ -13,9 +13,9 @@ echo ============================================
 echo.
 echo This will install:
 echo   1. Python virtual environment
-echo   2. AI model + packages (auto-downloaded)
+echo   2. All packages from requirements.txt
 echo.
-echo No Ollama or external servers needed!
+echo The AI model will auto-download on first run (~3GB).
 echo.
 set /p CONFIRM="Continue? [Y/n] "
 if /i "%CONFIRM%"=="n" (
@@ -60,12 +60,13 @@ if not exist "%VENV_DIR%" (
 echo [+] Activating virtual environment...
 call "%VENV_DIR%\Scripts\activate.bat"
 
-echo [+] Installing Python packages (this may take a few minutes)...
+echo [+] Upgrading pip...
 pip install --upgrade pip -q
-pip install -q transformers accelerate huggingface-hub torch numpy pyyaml
 
-echo [+] Core packages installed.
-echo [+] Voice packages will be installed if you use voice mode.
+echo [+] Installing Python packages from requirements.txt...
+pip install -r "%PROJECT_DIR%\requirements.txt" -q
+
+echo [+] All packages installed.
 
 REM ---- Done ----
 echo.
@@ -74,15 +75,20 @@ echo   Installation Complete!
 echo ============================================
 echo.
 echo Atlas is ready to go!
-echo The AI model will auto-download on first run (~3GB).
 echo.
 echo   To start (text mode):
 echo     cd %PROJECT_DIR%
 echo     .venv\Scripts\activate
 echo     python -m atlas.main --text-mode
 echo.
+echo   To start (voice mode):
+echo     python -m atlas.main
+echo.
+echo   To train Atlas's brain:
+echo     python -m atlas.main --train
+echo.
 echo   Configuration: %PROJECT_DIR%\config\settings.yaml
 echo.
-echo No API keys. No cloud. No Ollama. 100%% local!
+echo No API keys. No cloud. 100%% local!
 echo.
 pause

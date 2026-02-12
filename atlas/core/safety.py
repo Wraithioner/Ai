@@ -1,6 +1,7 @@
 """Safety module - prevents Atlas from doing dangerous things."""
 
 import logging
+import re
 import time
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,11 @@ BLOCKED_ACTIONS = [
     "delete account", "format disk", "factory reset",
     "rm -rf", "drop table", "shutdown",
 ]
+
+# Pre-compiled patterns for sensitive data detection
+_RE_CREDIT_CARD = re.compile(r"^\d{13,19}$")
+_RE_SSN_DIGITS = re.compile(r"^\d{9}$")
+_RE_SSN_FORMAT = re.compile(r"^\d{3}-\d{2}-\d{4}$")
 
 
 class Safety:
@@ -115,25 +121,20 @@ class Safety:
     def _is_financial_context(self, screen_text: str) -> bool:
         """Check if screen text suggests a financial site."""
         lower = screen_text.lower()
-        for keyword in FINANCIAL_KEYWORDS:
-            if keyword in lower:
-                return True
-        return False
+        return any(keyword in lower for keyword in FINANCIAL_KEYWORDS)
 
     def _looks_like_sensitive_data(self, text: str) -> bool:
         """Check if text looks like a credit card number, SSN, etc."""
-        import re
-
         stripped = text.replace(" ", "").replace("-", "")
 
         # Credit card pattern (13-19 digits)
-        if re.match(r"^\d{13,19}$", stripped):
+        if _RE_CREDIT_CARD.match(stripped):
             return True
 
         # SSN pattern (9 digits or xxx-xx-xxxx)
-        if re.match(r"^\d{9}$", stripped):
+        if _RE_SSN_DIGITS.match(stripped):
             return True
-        if re.match(r"^\d{3}-\d{2}-\d{4}$", text.strip()):
+        if _RE_SSN_FORMAT.match(text.strip()):
             return True
 
         return False

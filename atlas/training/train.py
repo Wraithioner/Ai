@@ -6,7 +6,7 @@ Usage:
 This will:
 1. Load the base model
 2. Load your training data from data/training/
-3. Fine-tune the model using LoRA (low-rank adaptation)
+3. Fine-tune the model
 4. Save the fine-tuned model to models/atlas-brain/
 
 After training, Atlas will automatically use your fine-tuned brain.
@@ -115,10 +115,18 @@ def run_training(config_path: str | None = None):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    # Use GPU with float16 if available for faster training
+    if torch.cuda.is_available():
+        dtype = torch.float16
+        print("  Using CUDA GPU for training.")
+    else:
+        dtype = torch.float32
+        print("  Using CPU for training (slower).")
+
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         cache_dir=cache_dir,
-        torch_dtype=torch.float32,
+        torch_dtype=dtype,
         trust_remote_code=False,
     )
     print("  Model loaded.")
@@ -127,11 +135,11 @@ def run_training(config_path: str | None = None):
     print("\n[3/4] Preparing training data...")
     formatted_texts = format_for_training(examples, tokenizer)
 
-    # Tokenize
+    # Tokenize (no padding needed since batch_size=1)
     encodings = tokenizer(
         formatted_texts,
         truncation=True,
-        padding=True,
+        padding=False,
         max_length=512,
         return_tensors="pt",
     )
@@ -155,7 +163,8 @@ def run_training(config_path: str | None = None):
 
     # Step 4: Train
     print("\n[4/4] Training Atlas's brain...")
-    print("  This may take a few minutes on CPU.")
+    if not torch.cuda.is_available():
+        print("  This may take a while on CPU.")
 
     training_args = TrainingArguments(
         output_dir=str(output_dir / "checkpoints"),
@@ -166,7 +175,7 @@ def run_training(config_path: str | None = None):
         warmup_steps=10,
         logging_steps=5,
         save_strategy="no",
-        fp16=False,
+        fp16=torch.cuda.is_available(),
         report_to="none",
         remove_unused_columns=False,
     )

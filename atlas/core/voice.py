@@ -1,11 +1,13 @@
 """Text-to-Speech module - speaks responses out loud.
 
-Uses Piper TTS (Linux) or pyttsx3/Windows SAPI (Windows) as a fallback.
+Uses Piper TTS (Linux) or Windows SAPI (Windows) as a fallback.
+Both engines support async speech with interrupt capability.
 """
 
 import logging
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from atlas.core.config import VOICE_CACHE_DIR
@@ -30,7 +32,11 @@ VOICE_URLS = {
 
 
 class Voice:
-    """Converts text to speech and plays it through the speakers."""
+    """Converts text to speech and plays it through the speakers.
+
+    Both Piper and SAPI support async speech with interrupt capability.
+    Piper async runs synthesis + playback in a background thread.
+    """
 
     def __init__(self, config: dict):
         tts_cfg = config["tts"]
@@ -43,24 +49,25 @@ class Voice:
         self._use_piper = False
         self._use_sapi = False
         self._speaking = False
+        self._stop_requested = False
         self._sapi_speaker = None
+        self._speech_thread = None
+        self._lock = threading.Lock()
 
     def initialize(self):
-        """Set up TTS engine. Tries Piper first, falls back to pyttsx3."""
-        # Try Piper TTS first
+        """Set up TTS engine. Tries Piper first, falls back to Windows SAPI."""
         if self._try_piper():
             self._use_piper = True
             logger.info("Using Piper TTS engine.")
             return
 
-        # Fall back to Windows SAPI directly
         if self._try_sapi():
             self._use_sapi = True
             logger.info("Using Windows SAPI TTS engine.")
             return
 
         raise RuntimeError(
-            "No TTS engine available. Install pywin32: pip install pywin32"
+            "No TTS engine available. Install piper-tts or pywin32."
         )
 
     def _try_piper(self) -> bool:
@@ -140,22 +147,52 @@ class Voice:
         logger.debug("Speaking: %s", text[:80])
 
         if self._use_piper:
-            self._speak_piper(text)
+            self._speak_piper_sync(text)
         elif self._use_sapi:
             self._speak_sapi(text)
 
     def speak_async(self, text: str):
-        """Start speaking without blocking. Use is_speaking() / wait_until_done() / stop()."""
+        """Start speaking without blocking. Use is_speaking() / stop()."""
         if not text:
             return
+
+        with self._lock:
+            self._speaking = True
+            self._stop_requested = False
+
         if self._use_sapi:
             self._speak_sapi_start(text)
-        else:
-            # Piper doesn't support async, fall back to blocking
-            self.speak(text)
+        elif self._use_piper:
+            self._speech_thread = threading.Thread(
+                target=self._speak_piper_async, args=(text,), daemon=True
+            )
+            self._speech_thread.start()
 
-    def _speak_piper(self, text: str):
-        """Speak using Piper TTS."""
+    def _speak_piper_sync(self, text: str):
+        """Speak using Piper TTS (blocking)."""
+        try:
+            raw_audio = self._synthesize_piper(text)
+            if raw_audio:
+                self._play_raw_audio(raw_audio)
+        except Exception as e:
+            logger.error("Piper TTS error: %s", e)
+
+    def _speak_piper_async(self, text: str):
+        """Speak using Piper TTS in a background thread (for interrupt support)."""
+        try:
+            raw_audio = self._synthesize_piper(text)
+            if not raw_audio or self._stop_requested:
+                return
+
+            self._play_raw_audio_interruptible(raw_audio)
+        except Exception as e:
+            logger.error("Piper async TTS error: %s", e)
+        finally:
+            with self._lock:
+                self._speaking = False
+
+    def _synthesize_piper(self, text: str) -> bytes | None:
+        """Run Piper synthesis and return raw PCM audio bytes."""
         try:
             piper_cmd = [
                 "piper",
@@ -178,33 +215,33 @@ class Voice:
 
             if not raw_audio:
                 logger.warning("Piper produced no audio output.")
-                return
+                return None
 
-            self._play_raw_audio(raw_audio)
-            logger.debug("Finished speaking.")
+            return raw_audio
 
         except subprocess.TimeoutExpired:
             logger.warning("Speech generation timed out.")
             piper_proc.kill()
-        except Exception as e:
-            logger.error("Piper TTS error: %s", e)
+            return None
 
     def _speak_sapi(self, text: str):
-        """Speak using Windows SAPI — blocks until speech finishes or stop() is called."""
+        """Speak using Windows SAPI — blocks until done or stop() called."""
         self._speak_sapi_start(text)
         self.wait_until_done()
 
     def _speak_sapi_start(self, text: str):
         """Start speaking asynchronously (returns immediately)."""
         try:
-            logger.info("Speaking out loud: %s", text[:80])
+            logger.debug("Speaking out loud: %s", text[:80])
 
             speaker = self._sapi_speaker
             if speaker is None:
                 logger.error("SAPI speaker not initialized.")
                 return
 
-            self._speaking = True
+            with self._lock:
+                self._speaking = True
+                self._stop_requested = False
 
             # Rate: -10 (slow) to 10 (fast), 0 is default
             speaker.Rate = int((self.rate - 1.0) * 5)
@@ -214,7 +251,8 @@ class Voice:
             speaker.Speak(text, 1)
 
         except Exception as e:
-            self._speaking = False
+            with self._lock:
+                self._speaking = False
             logger.error("SAPI TTS error: %s", e, exc_info=True)
 
     def wait_until_done(self):
@@ -227,38 +265,46 @@ class Voice:
                     break
             except Exception:
                 break
-        self._speaking = False
-        logger.info("Finished speaking.")
+        with self._lock:
+            self._speaking = False
 
     def is_speaking(self) -> bool:
-        """Check if currently speaking (polls SAPI status)."""
+        """Check if currently speaking."""
         if not self._speaking:
             return False
-        if self._sapi_speaker is not None:
+
+        if self._use_sapi and self._sapi_speaker is not None:
             try:
-                # WaitUntilDone(0) returns immediately: True if done, False if still speaking
                 done = self._sapi_speaker.WaitUntilDone(0)
                 if done:
-                    self._speaking = False
+                    with self._lock:
+                        self._speaking = False
                     return False
             except Exception:
-                self._speaking = False
+                with self._lock:
+                    self._speaking = False
                 return False
+
+        # For Piper, _speaking is managed by the background thread
         return self._speaking
 
     def stop(self):
         """Interrupt speech immediately."""
-        self._speaking = False
-        if self._sapi_speaker is not None:
+        with self._lock:
+            self._stop_requested = True
+            self._speaking = False
+
+        if self._use_sapi and self._sapi_speaker is not None:
             try:
                 # SVSFPurgeBeforeSpeak = 2, clears the queue and stops
                 self._sapi_speaker.Speak("", 2)
-                logger.info("Speech interrupted.")
             except Exception:
                 pass
 
+        logger.info("Speech interrupted.")
+
     def _play_raw_audio(self, raw_audio: bytes):
-        """Play raw PCM audio data using PyAudio (for Piper output)."""
+        """Play raw PCM audio data using PyAudio (blocking, no interrupt check)."""
         import pyaudio
 
         pa = pyaudio.PyAudio()
@@ -273,6 +319,31 @@ class Voice:
         try:
             chunk_size = 4096
             for i in range(0, len(raw_audio), chunk_size):
+                stream.write(raw_audio[i:i + chunk_size])
+        finally:
+            stream.stop_stream()
+            stream.close()
+            pa.terminate()
+
+    def _play_raw_audio_interruptible(self, raw_audio: bytes):
+        """Play raw PCM audio in chunks, checking for stop requests between chunks."""
+        import pyaudio
+
+        pa = pyaudio.PyAudio()
+        stream = pa.open(
+            format=pa.get_format_from_width(2),
+            channels=1,
+            rate=22050,
+            output=True,
+            output_device_index=self.output_device,
+        )
+
+        try:
+            chunk_size = 4096
+            for i in range(0, len(raw_audio), chunk_size):
+                if self._stop_requested:
+                    logger.info("Piper speech interrupted during playback.")
+                    break
                 stream.write(raw_audio[i:i + chunk_size])
         finally:
             stream.stop_stream()

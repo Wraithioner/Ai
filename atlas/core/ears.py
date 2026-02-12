@@ -3,6 +3,7 @@
 import logging
 
 import numpy as np
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,10 @@ class Ears:
 
     The mic stream opens once during initialize() and stays open for the
     entire session. Both listen() and poll_for_speech() use the same stream.
+
+    Optimizations:
+    - Pre-allocated numpy buffer and torch tensor to avoid per-chunk allocation
+    - VAD state reset between utterances for accurate detection
     """
 
     def __init__(self, config: dict):
@@ -33,6 +38,9 @@ class Ears:
         self.vad_model = None
         self._pa = None
         self._stream = None
+        # Pre-allocated buffers (initialized after we know chunk_size)
+        self._chunk_buffer = np.zeros(self.chunk_size, dtype=np.float32)
+        self._vad_tensor = torch.zeros(self.chunk_size, dtype=torch.float32)
 
     def initialize(self):
         """Load Whisper model, VAD model, and open the mic stream."""
@@ -44,7 +52,6 @@ class Ears:
         logger.info("Whisper model loaded.")
 
         logger.info("Loading Silero VAD model...")
-        import torch
         self.vad_model, self.vad_utils = torch.hub.load(
             repo_or_dir="snakers4/silero-vad",
             model="silero_vad",
@@ -98,6 +105,17 @@ class Ears:
         """Read one chunk from the always-on mic stream."""
         return self._stream.read(self.chunk_size, exception_on_overflow=False)
 
+    def _vad_probability(self, data: bytes) -> float:
+        """Get VAD speech probability for a single audio chunk.
+
+        Reuses pre-allocated numpy buffer and torch tensor to avoid
+        per-chunk memory allocation (~31 calls/sec at 16kHz/512).
+        """
+        int16_data = np.frombuffer(data, dtype=np.int16)
+        np.divide(int16_data, 32768.0, out=self._chunk_buffer, casting="unsafe")
+        self._vad_tensor.copy_(torch.from_numpy(self._chunk_buffer))
+        return self.vad_model(self._vad_tensor, self.sample_rate).item()
+
     def _transcribe(self, frames: list[bytes]) -> str | None:
         """Transcribe recorded audio frames with Whisper."""
         raw_audio = b"".join(frames)
@@ -124,9 +142,11 @@ class Ears:
         Args:
             vad_threshold: VAD probability threshold (default 0.5 for normal listening).
         """
-        import torch
-
         logger.debug("Listening for speech...")
+
+        # Reset VAD internal state before each new listening session
+        self.vad_model.reset_states()
+
         frames = []
         silent_chunks = 0
         speech_detected = False
@@ -137,11 +157,7 @@ class Ears:
         try:
             while True:
                 data = self._read_chunk()
-                audio_chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32)
-                audio_chunk /= 32768.0
-
-                tensor = torch.FloatTensor(audio_chunk)
-                speech_prob = self.vad_model(tensor, self.sample_rate).item()
+                speech_prob = self._vad_probability(data)
 
                 if speech_prob > vad_threshold:
                     speech_detected = True
@@ -179,8 +195,6 @@ class Ears:
         Args:
             vad_threshold: VAD probability threshold (0.85 = strict, ignores speakers).
         """
-        import torch
-
         if self._stream is None:
             return None
 
@@ -189,16 +203,13 @@ class Ears:
         except Exception:
             return None
 
-        audio_chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32)
-        audio_chunk /= 32768.0
-
-        tensor = torch.FloatTensor(audio_chunk)
-        speech_prob = self.vad_model(tensor, self.sample_rate).item()
+        speech_prob = self._vad_probability(data)
 
         if speech_prob <= vad_threshold:
             return None
 
-        # Speech detected — record until silence
+        # Speech detected — reset VAD state and record until silence
+        self.vad_model.reset_states()
         logger.debug("Speech detected (prob=%.2f), recording...", speech_prob)
         frames = [data]
         silent_chunks = 0
@@ -210,11 +221,7 @@ class Ears:
             except Exception:
                 break
 
-            audio_chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32)
-            audio_chunk /= 32768.0
-            tensor = torch.FloatTensor(audio_chunk)
-            prob = self.vad_model(tensor, self.sample_rate).item()
-
+            prob = self._vad_probability(data)
             frames.append(data)
 
             if prob > 0.5:
