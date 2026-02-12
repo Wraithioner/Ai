@@ -9,6 +9,9 @@ import * as scheduler from "./skills/scheduler.js";
 import * as comms from "./skills/comms.js";
 import { runPython } from "./utils/python.js";
 import { persona } from "./personality.js";
+import { evalJS } from "./skills/eval.js";
+import * as status from "./skills/status.js";
+import * as history from "./skills/history.js";
 
 const HELP = `**Your Personal Agent** — here's everything I can do:
 
@@ -63,21 +66,29 @@ const HELP = `**Your Personal Agent** — here's everything I can do:
 /slack \`<webhook_url>\` \`<msg>\` — Send to Slack
 /api \`<METHOD>\` \`<url>\` \`[body]\` — HTTP API call
 
-**Python**
+**Code**
+/eval \`<js>\` — Run JavaScript (sandboxed, instant)
 /py \`<code>\` — Run Python code
 /scrape \`<url>\` — Scrape a webpage
 
 **General**
 /help — This message
+/status — Dashboard overview
+/history \`[n]\` — Command history
+/clearhistory — Clear history
 /ping — Am I alive?
 /id — Your Telegram ID`;
 
 export { HELP };
 
-export async function route(text: string): Promise<string> {
+export async function route(text: string, user = "unknown"): Promise<string> {
   const parts = text.split(/\s+/);
   const cmd = parts[0].toLowerCase().split("@")[0]; // strip @botname
   const args = text.slice(parts[0].length).trim();
+
+  // Track command
+  history.record(text, user);
+  status.trackCommand(cmd);
 
   switch (cmd) {
     // --- General ---
@@ -215,11 +226,23 @@ export async function route(text: string): Promise<string> {
       return comms.apiCall(p[0], p[1], p[2]);
     }
 
-    // --- Python ---
+    // --- Code ---
+    case "/eval":
+      return args ? evalJS(args) : "Usage: `/eval <javascript>`";
     case "/py":
       return args ? runPython("run_code.py", [args]) : "Usage: `/py <code>`";
     case "/scrape":
       return args ? runPython("scrape.py", [args.trim()]) : "Usage: `/scrape <url>`";
+
+    // --- Meta ---
+    case "/status":
+      return status.getStatus();
+    case "/history": {
+      const count = parseInt(args) || 20;
+      return history.getHistory(count);
+    }
+    case "/clearhistory":
+      return history.clearHistory();
 
     default:
       return persona.responses.unknownCommand(cmd);
