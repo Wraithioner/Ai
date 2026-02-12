@@ -20,6 +20,14 @@ function getVerificationCode(): string {
   return process.env.ARENA_VERIFICATION_CODE ?? "";
 }
 
+function getWallet(): string {
+  return process.env.ARENA_WALLET ?? "";
+}
+
+function getWalletPrivateKey(): string {
+  return process.env.ARENA_WALLET_PRIVATE_KEY ?? "";
+}
+
 function api(
   method: string,
   path: string,
@@ -85,12 +93,16 @@ export function arenaConfig(): string {
   const id = getAgentId();
   const handle = getHandle();
   const code = getVerificationCode();
+  const wallet = getWallet();
+  const pk = getWalletPrivateKey();
   return [
     "Arena Configuration:",
     `API Key: ${key ? "set" : "NOT SET"}`,
     `Agent ID: ${id || "not set"}`,
     `Handle: ${handle ? `@${handle}` : "not set"}`,
     `Verification Code: ${code ? "set" : "not set"}`,
+    `Wallet: ${wallet || "not set"}`,
+    `Wallet Key: ${pk ? "set (hidden)" : "not set"}`,
   ].join("\n");
 }
 
