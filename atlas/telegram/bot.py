@@ -169,7 +169,47 @@ class TelegramBot:
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
     # ================================================================
-    # MESSAGE HANDLER — LLM inference (owner-only)
+    # INTENT DETECTION — route natural language to Arena actions
+    # ================================================================
+
+    # Patterns that indicate "post to Arena"
+    _POST_PATTERNS = [
+        r"(?:create|make|write|draft|compose|do|send)\s+(?:a\s+)?(?:post|thread|tweet)",
+        r"post\s+(?:on|to|about|this)",
+        r"(?:put|share)\s+(?:this\s+)?(?:on|to)\s+arena",
+        r"arena\s+post",
+    ]
+
+    # Patterns that indicate "reply on Arena"
+    _REPLY_PATTERNS = [
+        r"(?:reply|respond|answer)\s+(?:to|on)\s+(?:arena|thread|post)",
+    ]
+
+    def _detect_arena_intent(self, text: str) -> tuple[str | None, str]:
+        """Detect if a message is requesting an Arena action.
+
+        Returns:
+            (intent, topic) — intent is "post", "reply", or None.
+            topic is the subject/content hint extracted from the message.
+        """
+        lower = text.lower()
+
+        # Check for post intent
+        for pattern in self._POST_PATTERNS:
+            if re.search(pattern, lower):
+                # Extract the topic: everything after "about" or "on arena"
+                topic = text
+                about_match = re.search(r"(?:about|regarding|on)\s+(.+)", lower)
+                if about_match:
+                    topic = about_match.group(1).strip()
+                    # Remove trailing "on arena" if present
+                    topic = re.sub(r"\s+on\s+arena\s*$", "", topic, flags=re.IGNORECASE)
+                return "post", topic
+
+        return None, text
+
+    # ================================================================
+    # MESSAGE HANDLER — LLM inference + intent routing (owner-only)
     # ================================================================
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -185,7 +225,14 @@ class TelegramBot:
         # Show typing while generating
         await update.message.chat.send_action("typing")
 
-        # Run blocking LLM inference in a thread to avoid freezing the event loop
+        # Check if this is an Arena action request
+        intent, topic = self._detect_arena_intent(text)
+
+        if intent == "post" and self.arena and self.arena.configured:
+            await self._handle_arena_post_intent(update, text, topic)
+            return
+
+        # Regular LLM conversation
         try:
             response = await asyncio.to_thread(
                 self.brain.think, text, user_id=self.owner_id
@@ -196,6 +243,40 @@ class TelegramBot:
             return
 
         await send_long(update, response)
+
+    async def _handle_arena_post_intent(self, update: Update, original_text: str, topic: str):
+        """Handle natural language post request: generate content via LLM, then post to Arena."""
+        # Ask the LLM to generate Arena post content
+        prompt = (
+            f"Write a short post for Arena (social media) about: {topic}\n\n"
+            "Rules: No hashtags. No bold. No emojis. No markdown. "
+            "Keep it under 280 characters. Just clean, natural text."
+        )
+
+        try:
+            content = await asyncio.to_thread(
+                self.brain.think, prompt, user_id=self.owner_id
+            )
+        except Exception as e:
+            logger.error("LLM error generating post: %s", e)
+            await update.message.reply_text("Failed to generate post content.")
+            return
+
+        if not content or len(content.strip()) < 3:
+            await update.message.reply_text("Could not generate post content.")
+            return
+
+        content = content.strip()
+
+        # Post to Arena
+        result = await asyncio.to_thread(self.arena.create_thread, f"<p>{content}</p>")
+
+        if result:
+            msg = f"Posted to Arena:\n\n{content}"
+            await send_long(update, msg)
+        else:
+            msg = f"Generated but failed to post:\n\n{content}\n\nTry again with /post"
+            await send_long(update, msg)
 
     # ================================================================
     # ARENA — POSTS
