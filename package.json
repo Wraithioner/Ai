@@ -1,0 +1,26 @@
+{
+  "name": "atlas-agent",
+  "version": "0.2.0",
+  "description": "Atlas — Personal AI agent with Telegram gateway, Arena.social integration, and full system toolkit",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "grammy": "^1.35.0",
+    "nodemailer": "^8.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/nodemailer": "^7.0.9",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
